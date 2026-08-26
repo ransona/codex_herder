@@ -77,6 +77,24 @@ This avoids depending on informal manual naming.
 
 ## Install
 
+### Conda
+
+Build the project environment from the repository definition:
+
+```bash
+cd /home/adamranson/code/codex_herder
+conda env create -f environment.yml
+conda activate codex_herder
+```
+
+If the environment already exists, update it after changing dependencies with:
+
+```bash
+conda env update -f environment.yml --prune
+```
+
+### Python virtual environment
+
 ```bash
 cd /home/adamranson/code/codex_herder
 python3 -m venv .venv
