@@ -1,0 +1,7 @@
+[Unit]
+Description=Sample Codex credit usage
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/adamranson/code/codex_herder
+ExecStart=/home/adamranson/miniconda3/envs/codex_herder/bin/codex-usage --once

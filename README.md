@@ -110,6 +110,84 @@ cd /home/adamranson/code/codex_herder
 codex-herder
 ```
 
+## Codex Credit Usage Tracker
+
+The separate `codex-usage` program samples the currently logged-in Codex
+account through `codex app-server` once per minute and stores samples in the
+SQLite database `.codex_herder/codex_usage.sqlite3`. The GUI shows remaining
+capacity for the 5-hour and 7-day windows as pie charts, plus usage line charts
+for the past 7 days and past 24 hours.
+
+```bash
+conda activate codex_herder
+codex-usage
+```
+
+To take one sample without opening the GUI:
+
+```bash
+codex-usage --once
+```
+
+### Run the sampler in the background
+
+On Linux, the repository includes a systemd user service and timer. The timer
+runs the one-shot sampler once per minute, so the GUI does not need to remain
+open. The included unit files target this machine's paths
+(`/home/adamranson/code/codex_herder` and `/home/adamranson/miniconda3`); edit
+`systemd/codex-usage.service` before copying it if your paths differ.
+
+Install and start it after activating the `codex_herder` environment at least
+once:
+
+```bash
+cd /home/adamranson/code/codex_herder
+conda activate codex_herder
+python -m pip install -e '.[dev]'
+mkdir -p ~/.config/systemd/user
+cp systemd/codex-usage.service systemd/codex-usage.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now codex-usage.timer
+```
+
+Check that it is active and inspect sampler logs with:
+
+```bash
+systemctl --user status codex-usage.timer
+systemctl --user list-timers codex-usage.timer
+journalctl --user -u codex-usage.service -f
+```
+
+The service uses the existing Codex CLI login and writes to the same
+`.codex_herder/codex_usage.sqlite3` database. Verify the login if sampling
+fails:
+
+```bash
+codex login status
+```
+
+To stop and remove the background sampler:
+
+```bash
+systemctl --user disable --now codex-usage.timer
+rm ~/.config/systemd/user/codex-usage.service ~/.config/systemd/user/codex-usage.timer
+systemctl --user daemon-reload
+```
+
+The timer does not backfill samples missed while the computer was off. It
+resumes on the next scheduled minute after startup. User timers normally run
+while the user session is active; to keep sampling when logged out, enable
+lingering for your account (if permitted):
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+The tracker requires an active Codex CLI login (`codex login status`). It
+records the account email, plan, primary and secondary rate-limit windows,
+reset times, and available credit balance; it does not store authentication
+tokens.
+
 ## Tests
 
 ```bash

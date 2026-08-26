@@ -8,6 +8,7 @@ src/codex_herder/sessions.py
 src/codex_herder/storage.py
 src/codex_herder/terminal.py
 src/codex_herder/tmux_manager.py
+src/codex_herder/usage_tracker.py
 src/codex_herder.egg-info/PKG-INFO
 src/codex_herder.egg-info/SOURCES.txt
 src/codex_herder.egg-info/dependency_links.txt

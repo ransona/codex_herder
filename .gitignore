@@ -1,5 +1,6 @@
 .venv/
 .codex_herder/
+.codex_usage.sqlite3
 __pycache__/
 *.pyc
 .tmp_*

@@ -23,6 +23,7 @@ dev = [
 
 [project.scripts]
 codex-herder = "codex_herder.main:main"
+codex-usage = "codex_herder.main:usage_main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
