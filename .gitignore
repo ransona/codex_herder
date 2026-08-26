@@ -1,0 +1,5 @@
+.venv/
+.codex_herder/
+__pycache__/
+*.pyc
+.tmp_*

@@ -1,0 +1,2 @@
+[console_scripts]
+codex-herder = codex_herder.main:main
