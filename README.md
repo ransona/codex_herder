@@ -116,7 +116,7 @@ The separate `codex-usage` program samples the currently logged-in Codex
 account through `codex app-server` once per minute and stores samples in the
 SQLite database `.codex_herder/codex_usage.sqlite3`. The GUI shows remaining
 capacity for the 5-hour and 7-day windows as pie charts, plus usage line charts
-for the past 7 days and past 24 hours.
+for the past 5 hours, past 24 hours, and past 7 days.
 
 ```bash
 conda activate codex_herder

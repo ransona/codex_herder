@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Qt, Signal
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -274,7 +274,7 @@ class RemainingPieChart(QWidget):
         remaining = 100.0 if self.used_percent is None else max(0.0, min(100.0, 100.0 - self.used_percent))
         painter.setBrush(self.palette().mid())
         painter.drawEllipse(x, y, diameter, diameter)
-        painter.setBrush("#2f80ed")
+        painter.setBrush(QColor("#2f80ed"))
         painter.drawPie(x, y, diameter, diameter, 90 * 16, int(-remaining * 3.6 * 16))
         painter.setPen(self.palette().text())
         painter.drawText(x, y + diameter // 2 - 12, diameter, 24, Qt.AlignCenter, f"{remaining:.1f}%")
@@ -327,13 +327,13 @@ class UsageLineChart(QWidget):
             painter.drawText(2, int(y) - 8, 45, 16, Qt.AlignRight, f"{tick}%")
         self._line(painter, plot, [row["primary_used_percent"] for row in self.rows], "#2f80ed")
         self._line(painter, plot, [row["secondary_used_percent"] for row in self.rows], "#eb5757")
-        painter.setPen(QPen("#2f80ed", 2))
+        painter.setPen(QPen(QColor("#2f80ed"), 2))
         painter.drawText(plot.left(), self.height() - 10, "oldest")
-        painter.setPen(QPen("#eb5757", 2))
+        painter.setPen(QPen(QColor("#eb5757"), 2))
         painter.drawText(plot.right() - 45, self.height() - 10, "newest")
-        painter.setPen(QPen("#2f80ed", 2))
+        painter.setPen(QPen(QColor("#2f80ed"), 2))
         painter.drawText(65, 24, "Primary")
-        painter.setPen(QPen("#eb5757", 2))
+        painter.setPen(QPen(QColor("#eb5757"), 2))
         painter.drawText(125, 24, "Secondary")
 
     @staticmethod
@@ -347,7 +347,7 @@ class UsageLineChart(QWidget):
             points = points[::stride]
             if points[-1][0] != len(values) - 1:
                 points.append((len(values) - 1, values[-1]))
-        painter.setPen(QPen(color, 2))
+        painter.setPen(QPen(QColor(color), 2))
         count = max(1, len(values) - 1)
         previous = None
         for index, value in points:
@@ -377,8 +377,9 @@ class UsageWindow(QMainWindow):
             button.setFixedWidth(36)
         self.primary_pie = RemainingPieChart("5-hour window")
         self.secondary_pie = RemainingPieChart("7-day window")
-        self.week_chart = UsageLineChart("Past 7 days")
+        self.hour_chart = UsageLineChart("Past 5 hours")
         self.day_chart = UsageLineChart("Past 24 hours")
+        self.week_chart = UsageLineChart("Past 7 days")
         self.status_label = QLabel(f"Database: {database.path}")
         self.thread_pool = QThreadPool(self)
         self.sampling_in_progress = False
@@ -407,8 +408,9 @@ class UsageWindow(QMainWindow):
         pies.addWidget(self.secondary_pie, 1)
         charts.addLayout(pies, 1)
         lines = QVBoxLayout()
-        lines.addWidget(self.week_chart, 1)
+        lines.addWidget(self.hour_chart, 1)
         lines.addWidget(self.day_chart, 1)
+        lines.addWidget(self.week_chart, 1)
         charts.addLayout(lines, 3)
         layout.addLayout(charts, 1)
         layout.addWidget(self.status_label)
@@ -468,8 +470,10 @@ class UsageWindow(QMainWindow):
         else:
             self.primary_pie.set_used_percent(None)
             self.secondary_pie.set_used_percent(None)
-        week_rows = self.database.samples_since(now - 7 * 86400, self.selected_account)
+        hour_rows = self.database.samples_since(now - 5 * 3600, self.selected_account)
         day_rows = self.database.samples_since(now - 24 * 3600, self.selected_account)
+        week_rows = self.database.samples_since(now - 7 * 86400, self.selected_account)
+        self.hour_chart.set_rows(hour_rows)
         self.week_chart.set_rows(week_rows)
         self.day_chart.set_rows(day_rows)
 
