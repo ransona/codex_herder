@@ -251,9 +251,10 @@ def collect_sample() -> UsageSample:
 
 
 class RemainingPieChart(QWidget):
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, color: str) -> None:
         super().__init__()
         self.title = title
+        self.color = QColor(color)
         self.used_percent: float | None = None
         self.setMinimumSize(190, 190)
 
@@ -274,7 +275,7 @@ class RemainingPieChart(QWidget):
         remaining = 100.0 if self.used_percent is None else max(0.0, min(100.0, 100.0 - self.used_percent))
         painter.setBrush(self.palette().mid())
         painter.drawEllipse(x, y, diameter, diameter)
-        painter.setBrush(QColor("#2f80ed"))
+        painter.setBrush(self.color)
         painter.drawPie(x, y, diameter, diameter, 90 * 16, int(-remaining * 3.6 * 16))
         painter.setPen(self.palette().text())
         painter.drawText(x, y + diameter // 2 - 12, diameter, 24, Qt.AlignCenter, f"{remaining:.1f}%")
@@ -299,10 +300,13 @@ class SamplerTask(QRunnable):
 
 
 class UsageLineChart(QWidget):
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, window_seconds: int, grid_seconds: int, axis_unit: str) -> None:
         super().__init__()
         self.rows: list[sqlite3.Row] = []
         self.title = title
+        self.window_seconds = window_seconds
+        self.grid_seconds = grid_seconds
+        self.axis_unit = axis_unit
         self.setMinimumHeight(260)
 
     def set_rows(self, rows: list[sqlite3.Row]) -> None:
@@ -325,33 +329,37 @@ class UsageLineChart(QWidget):
             y = plot.bottom() - (plot.height() * tick / 100)
             painter.drawLine(plot.left(), int(y), plot.right(), int(y))
             painter.drawText(2, int(y) - 8, 45, 16, Qt.AlignRight, f"{tick}%")
-        self._line(painter, plot, [row["primary_used_percent"] for row in self.rows], "#2f80ed")
-        self._line(painter, plot, [row["secondary_used_percent"] for row in self.rows], "#eb5757")
-        painter.setPen(QPen(QColor("#2f80ed"), 2))
-        painter.drawText(plot.left(), self.height() - 10, "oldest")
-        painter.setPen(QPen(QColor("#eb5757"), 2))
-        painter.drawText(plot.right() - 45, self.height() - 10, "newest")
-        painter.setPen(QPen(QColor("#2f80ed"), 2))
-        painter.drawText(65, 24, "Primary")
-        painter.setPen(QPen(QColor("#eb5757"), 2))
-        painter.drawText(125, 24, "Secondary")
+        end_time = time.time()
+        start_time = end_time - self.window_seconds
+        painter.setPen(QPen(self.palette().mid(), 1, Qt.DotLine))
+        tick_time = end_time - (end_time % self.grid_seconds)
+        while tick_time >= start_time:
+            fraction = (tick_time - start_time) / self.window_seconds
+            x = int(plot.left() + plot.width() * fraction)
+            painter.drawLine(x, plot.top(), x, plot.bottom())
+            elapsed = max(0, int(round((end_time - tick_time) / self.grid_seconds)))
+            label = "now" if elapsed == 0 else f"-{elapsed * self.grid_seconds // (3600 if self.axis_unit == 'h' else 86400)}{self.axis_unit}"
+            painter.drawText(x - 25, self.height() - 10, 50, 16, Qt.AlignCenter, label)
+            tick_time -= self.grid_seconds
+        self._line(painter, plot, [(row["sampled_at"], row["primary_used_percent"]) for row in self.rows], "#2f80ed", start_time, end_time)
+        self._line(painter, plot, [(row["sampled_at"], row["secondary_used_percent"]) for row in self.rows], "#eb5757", start_time, end_time)
 
     @staticmethod
-    def _line(painter: QPainter, plot, values: list[Any], color: str) -> None:
-        points = [(index, value) for index, value in enumerate(values) if value is not None]
+    def _line(painter: QPainter, plot, values: list[tuple[int, Any]], color: str, start_time: float, end_time: float) -> None:
+        points = [(timestamp, value) for timestamp, value in values if value is not None]
         if not points:
             return
         dense = len(points) > 1000
         if dense:
             stride = max(1, len(points) // 1000)
             points = points[::stride]
-            if points[-1][0] != len(values) - 1:
-                points.append((len(values) - 1, values[-1]))
+            last_point = next((point for point in reversed(values) if point[1] is not None), None)
+            if last_point is not None and points[-1][0] != last_point[0]:
+                points.append(last_point)
         painter.setPen(QPen(QColor(color), 2))
-        count = max(1, len(values) - 1)
         previous = None
-        for index, value in points:
-            x = plot.left() + plot.width() * index / count
+        for timestamp, value in points:
+            x = plot.left() + plot.width() * (timestamp - start_time) / (end_time - start_time)
             y = plot.bottom() - plot.height() * max(0, min(100, float(value))) / 100
             current = (int(x), int(y))
             if previous is not None:
@@ -375,11 +383,11 @@ class UsageWindow(QMainWindow):
         self.next_account_button = QPushButton("▶")
         for button in (self.previous_account_button, self.next_account_button):
             button.setFixedWidth(36)
-        self.primary_pie = RemainingPieChart("5-hour window")
-        self.secondary_pie = RemainingPieChart("7-day window")
-        self.hour_chart = UsageLineChart("Past 5 hours")
-        self.day_chart = UsageLineChart("Past 24 hours")
-        self.week_chart = UsageLineChart("Past 7 days")
+        self.primary_pie = RemainingPieChart("5-hour window", "#2f80ed")
+        self.secondary_pie = RemainingPieChart("7-day window", "#eb5757")
+        self.hour_chart = UsageLineChart("Past 5 hours", 5 * 3600, 3600, "h")
+        self.day_chart = UsageLineChart("Past 24 hours", 24 * 3600, 5 * 3600, "h")
+        self.week_chart = UsageLineChart("Past 7 days", 7 * 86400, 86400, "d")
         self.status_label = QLabel(f"Database: {database.path}")
         self.thread_pool = QThreadPool(self)
         self.sampling_in_progress = False
