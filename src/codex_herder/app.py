@@ -15,12 +15,13 @@ try:
 except Exception:  # pragma: no cover
     cv2 = None  # type: ignore[assignment]
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QPainter, QPixmap, QDesktopServices, QImage
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -126,16 +127,130 @@ class FigurePreviewLabel(QLabel):
         super().__init__(empty_text)
         self._figure_path: Path | None = None
         self._open_callback: callable | None = None
+        self._source_pixmap = QPixmap()
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self._drag_start: QPoint | None = None
+        self._last_escape_at = 0.0
+        self.setFocusPolicy(Qt.StrongFocus)
 
     def set_open_callback(self, callback: callable) -> None:
         self._open_callback = callback
 
     def set_figure_path(self, path: Path | None) -> None:
+        if path != self._figure_path:
+            self._zoom = 1.0
+            self._pan = QPoint(0, 0)
         self._figure_path = path
 
+    def set_source_pixmap(self, pixmap: QPixmap) -> None:
+        self._source_pixmap = pixmap
+        self.setText("")
+        self.update()
+
+    def zoom_in(self) -> None:
+        if not self._source_pixmap.isNull():
+            self.zoom_in_at(QPoint(self.width() // 2, self.height() // 2))
+
+    def zoom_in_at(self, point: QPoint) -> None:
+        if self._source_pixmap.isNull():
+            return
+        old_scaled, old_center = self._scaled_geometry(self._zoom)
+        old_position = old_center + self._pan
+        if old_scaled.width() > 0 and old_scaled.height() > 0:
+            relative_x = (point.x() - old_position.x()) / old_scaled.width()
+            relative_y = (point.y() - old_position.y()) / old_scaled.height()
+        else:
+            relative_x = relative_y = 0.5
+        self._zoom *= 1.2
+        new_scaled, new_center = self._scaled_geometry(self._zoom)
+        self._pan = QPoint(
+            int(point.x() - new_center.x() - relative_x * new_scaled.width()),
+            int(point.y() - new_center.y() - relative_y * new_scaled.height()),
+        )
+        self.update()
+
+    def _scaled_geometry(self, zoom: float) -> tuple[QSize, QPoint]:
+        base_size = self._source_pixmap.size()
+        base_size.scale(max(1, self.width() - 20), max(1, self.height() - 20), Qt.KeepAspectRatio)
+        scaled_size = QSize(max(1, int(base_size.width() * zoom)), max(1, int(base_size.height() * zoom)))
+        center = QPoint((self.width() - scaled_size.width()) // 2, (self.height() - scaled_size.height()) // 2)
+        return scaled_size, center
+
+    def reset_view(self) -> None:
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self.update()
+
+    def clear_source_pixmap(self, text: str = "") -> None:
+        self._source_pixmap = QPixmap()
+        self._zoom = 1.0
+        self._pan = QPoint(0, 0)
+        self.setPixmap(QPixmap())
+        self.setText(text)
+        self.update()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        if self._source_pixmap.isNull():
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self.palette().base())
+        target_size, centered_position = self._scaled_geometry(self._zoom)
+        scaled = self._source_pixmap.scaled(target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        position = centered_position + self._pan
+        painter.drawPixmap(position, scaled)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.LeftButton and not self._source_pixmap.isNull():
+            self.setFocus(Qt.MouseFocusReason)
+            self._drag_start = event.position().toPoint()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._drag_start is not None:
+            current = event.position().toPoint()
+            self._pan += current - self._drag_start
+            self._drag_start = current
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        self._drag_start = None
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() == Qt.Key_Escape and not self._source_pixmap.isNull():
+            now = time.monotonic()
+            if now - self._last_escape_at < 0.45:
+                self.reset_view()
+            else:
+                self._zoom = max(1.0, self._zoom / 1.2)
+                if self._zoom <= 1.0:
+                    self._pan = QPoint(0, 0)
+                else:
+                    self._pan = QPoint(int(self._pan.x() / 1.2), int(self._pan.y() / 1.2))
+                self.update()
+            self._last_escape_at = now
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
-        if event.button() == Qt.LeftButton and self._figure_path is not None and self._open_callback is not None:
-            self._open_callback(self._figure_path)
+        if event.button() == Qt.LeftButton and not self._source_pixmap.isNull():
+            self.zoom_in_at(event.position().toPoint())
+            event.accept()
+            return
+        if event.button() == Qt.RightButton and not self._source_pixmap.isNull():
+            self.reset_view()
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -408,6 +523,8 @@ class ExperimentGroupDialog(QDialog):
         self.add_button = QPushButton("Add")
         self.entries_list = QListWidget()
         self.remove_button = QPushButton("Remove Selected")
+        self.move_up_button = QPushButton("↑ Move Up")
+        self.move_down_button = QPushButton("↓ Move Down")
         self.save_button = QPushButton("Save Group")
         layout.addWidget(QLabel("expIDs"))
         layout.addWidget(self.exp_ids_edit)
@@ -416,11 +533,18 @@ class ExperimentGroupDialog(QDialog):
         layout.addWidget(self.add_button)
         layout.addWidget(QLabel("Current group entries"))
         layout.addWidget(self.entries_list, 1)
-        layout.addWidget(self.remove_button)
+        entry_controls = QHBoxLayout()
+        entry_controls.addWidget(self.move_up_button)
+        entry_controls.addWidget(self.move_down_button)
+        entry_controls.addWidget(self.remove_button)
+        layout.addLayout(entry_controls)
         layout.addWidget(self.save_button)
         self._entries: list[ExperimentRef] = list(group.experiments) if group is not None else []
         self.add_button.clicked.connect(self._add_entries)
         self.remove_button.clicked.connect(self._remove_selected)
+        self.move_up_button.clicked.connect(lambda: self._move_selected(-1))
+        self.move_down_button.clicked.connect(lambda: self._move_selected(1))
+        self.entries_list.currentRowChanged.connect(lambda _row: self._refresh_entry_controls())
         self.save_button.clicked.connect(self.accept)
         self._refresh_entries()
 
@@ -444,10 +568,26 @@ class ExperimentGroupDialog(QDialog):
         del self._entries[row]
         self._refresh_entries()
 
+    def _move_selected(self, direction: int) -> None:
+        row = self.entries_list.currentRow()
+        target = row + direction
+        if row < 0 or target < 0 or target >= len(self._entries):
+            return
+        self._entries[row], self._entries[target] = self._entries[target], self._entries[row]
+        self._refresh_entries()
+        self.entries_list.setCurrentRow(target)
+
     def _refresh_entries(self) -> None:
         self.entries_list.clear()
         for entry in self._entries:
             self.entries_list.addItem(f"{entry.exp_id} ({entry.user_id})" if entry.user_id else entry.exp_id)
+        self._refresh_entry_controls()
+
+    def _refresh_entry_controls(self) -> None:
+        row = self.entries_list.currentRow()
+        self.move_up_button.setEnabled(row > 0)
+        self.move_down_button.setEnabled(0 <= row < len(self._entries) - 1)
+        self.remove_button.setEnabled(row >= 0)
 
     def result_group(self) -> ExperimentGroup:
         return ExperimentGroup(name=self.group_name, experiments=list(self._entries))
@@ -513,26 +653,27 @@ class CodexHerderApp(QMainWindow):
 
         project_row = QHBoxLayout()
         self.new_project_button = QPushButton("New Project")
-        self.tmux_button = QPushButton("Tmux Sessions")
         project_row.addWidget(self.new_project_button)
-        project_row.addWidget(self.tmux_button)
         left_layout.addLayout(project_row)
 
         left_layout.addWidget(QLabel("Projects"))
         self.project_list = QListWidget()
         left_layout.addWidget(self.project_list, 1)
 
-        analysis_row = QHBoxLayout()
+        analysis_row = QGridLayout()
         self.new_analysis_button = QPushButton("New Analysis")
         self.copy_analysis_button = QPushButton("Copy Analysis")
-        self.move_up_button = QPushButton("Move Up")
-        self.move_down_button = QPushButton("Move Down")
+        self.move_up_button = QPushButton("↑")
+        self.move_down_button = QPushButton("↓")
         self.delete_button = QPushButton("Delete")
-        analysis_row.addWidget(self.new_analysis_button)
-        analysis_row.addWidget(self.copy_analysis_button)
-        analysis_row.addWidget(self.move_up_button)
-        analysis_row.addWidget(self.move_down_button)
-        analysis_row.addWidget(self.delete_button)
+        analysis_row.addWidget(self.new_analysis_button, 0, 0)
+        analysis_row.addWidget(self.copy_analysis_button, 0, 1)
+        analysis_row.addWidget(self.move_up_button, 1, 0)
+        analysis_row.addWidget(self.move_down_button, 1, 1)
+        analysis_row.addWidget(self.delete_button, 1, 2)
+        analysis_row.setColumnStretch(0, 1)
+        analysis_row.setColumnStretch(1, 1)
+        analysis_row.setColumnStretch(2, 1)
         left_layout.addLayout(analysis_row)
 
         left_layout.addWidget(QLabel("Analyses"))
@@ -543,15 +684,17 @@ class CodexHerderApp(QMainWindow):
         left_layout.addWidget(QLabel("Experiment Groupings"))
         self.experiment_group_list = QListWidget()
         left_layout.addWidget(self.experiment_group_list, 1)
-        exp_group_row = QHBoxLayout()
+        exp_group_row = QGridLayout()
         self.new_exp_group_button = QPushButton("New Exp Group")
         self.edit_exp_group_button = QPushButton("Edit Exp Group")
         self.rename_exp_group_button = QPushButton("Rename Exp Group")
         self.delete_exp_group_button = QPushButton("Delete Exp Group")
-        exp_group_row.addWidget(self.new_exp_group_button)
-        exp_group_row.addWidget(self.edit_exp_group_button)
-        exp_group_row.addWidget(self.rename_exp_group_button)
-        exp_group_row.addWidget(self.delete_exp_group_button)
+        exp_group_row.addWidget(self.new_exp_group_button, 0, 0)
+        exp_group_row.addWidget(self.edit_exp_group_button, 0, 1)
+        exp_group_row.addWidget(self.rename_exp_group_button, 1, 0)
+        exp_group_row.addWidget(self.delete_exp_group_button, 1, 1)
+        exp_group_row.setColumnStretch(0, 1)
+        exp_group_row.setColumnStretch(1, 1)
         left_layout.addLayout(exp_group_row)
         main_splitter.addWidget(left_panel)
 
@@ -604,7 +747,6 @@ class CodexHerderApp(QMainWindow):
         self.move_up_button.clicked.connect(lambda: self._move_selected_analysis(-1))
         self.move_down_button.clicked.connect(lambda: self._move_selected_analysis(1))
         self.delete_button.clicked.connect(self._delete_selected)
-        self.tmux_button.clicked.connect(self._show_tmux_sessions)
         self.launch_button.clicked.connect(self._launch_new_session)
         self.resume_button.clicked.connect(self._resume_selected_session)
         self.link_button.clicked.connect(self._link_existing_session)
@@ -864,8 +1006,13 @@ class CodexHerderApp(QMainWindow):
             preview = FigurePreviewLabel("No figure selected")
             preview.set_open_callback(self._open_figure_window)
             preview.setAlignment(Qt.AlignCenter)
-            layout.addWidget(left_panel, 1)
-            layout.addWidget(preview, 3)
+            splitter = QSplitter(Qt.Horizontal)
+            splitter.addWidget(left_panel)
+            splitter.addWidget(preview)
+            splitter.setStretchFactor(0, 1)
+            splitter.setStretchFactor(1, 3)
+            splitter.setSizes([260, 760])
+            layout.addWidget(splitter)
             assets_dir = iteration.path / "output" / "figures"
             files: list[Path] = []
             item_targets: dict[int, Path] = {}
@@ -874,17 +1021,15 @@ class CodexHerderApp(QMainWindow):
             def _show_path(path: Path | None) -> None:
                 if path is None or path.is_dir():
                     preview.set_figure_path(None)
-                    preview.setText("No figure selected" if path is None else str(path.relative_to(assets_dir)))
-                    preview.setPixmap(QPixmap())
+                    preview.clear_source_pixmap("No figure selected" if path is None else str(path.relative_to(assets_dir)))
                     return
                 preview.set_figure_path(path)
                 if path.suffix.lower() in IMAGE_EXTENSIONS:
                     pixmap = QPixmap(str(path))
                     if pixmap.isNull():
-                        preview.setText(str(path.relative_to(assets_dir)))
-                        preview.setPixmap(QPixmap())
+                        preview.clear_source_pixmap(str(path.relative_to(assets_dir)))
                         return
-                    preview.setPixmap(pixmap.scaled(QSize(900, 720), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                    preview.set_source_pixmap(pixmap)
                     return
                 if path.suffix.lower() in SVG_EXTENSIONS:
                     pixmap = QPixmap(900, 720)
@@ -893,10 +1038,9 @@ class CodexHerderApp(QMainWindow):
                     renderer = QSvgRenderer(str(path))
                     renderer.render(painter)
                     painter.end()
-                    preview.setPixmap(pixmap)
+                    preview.set_source_pixmap(pixmap)
                     return
-                preview.setText(str(path.relative_to(assets_dir)))
-                preview.setPixmap(QPixmap())
+                preview.clear_source_pixmap(str(path.relative_to(assets_dir)))
 
             def _current_selected_path() -> Path | None:
                 item = listing.currentItem()
@@ -911,7 +1055,8 @@ class CodexHerderApp(QMainWindow):
             def _on_item_double_clicked(item: QTreeWidgetItem, _column: int) -> None:
                 path = item_targets.get(id(item))
                 if path is not None and path.is_file():
-                    self._open_figure_window(path)
+                    _show_path(path)
+                    preview.zoom_in()
 
             def _refresh_button_state() -> None:
                 enabled = _current_selected_path() is not None
