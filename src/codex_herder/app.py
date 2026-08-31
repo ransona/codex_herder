@@ -122,6 +122,21 @@ class Selection:
     experiment_entry: ExperimentRef | None = None
 
 
+def _expanded_tree_paths(tree: QTreeWidget, item_targets: dict[int, Path], root: Path) -> set[str]:
+    expanded: set[str] = set()
+
+    def visit(item: QTreeWidgetItem) -> None:
+        target = item_targets.get(id(item))
+        if item.isExpanded() and target is not None and target.is_dir():
+            expanded.add(str(target.relative_to(root)))
+        for child_index in range(item.childCount()):
+            visit(item.child(child_index))
+
+    for index in range(tree.topLevelItemCount()):
+        visit(tree.topLevelItem(index))
+    return expanded
+
+
 class FigurePreviewLabel(QLabel):
     def __init__(self, empty_text: str) -> None:
         super().__init__(empty_text)
@@ -1115,6 +1130,7 @@ class CodexHerderApp(QMainWindow):
                     _show_path(selected_path)
                     return
                 files = new_files
+                expanded_paths = _expanded_tree_paths(listing, item_targets, assets_dir)
                 item_targets.clear()
                 selected_item: QTreeWidgetItem | None = None
                 listing.blockSignals(True)
@@ -1136,6 +1152,7 @@ class CodexHerderApp(QMainWindow):
                                 parent_item.addChild(folder_item)
                             folder_items[folder_key] = folder_item
                             item_targets[id(folder_item)] = assets_dir.joinpath(*folder_key)
+                            folder_item.setExpanded("/".join(folder_key) in expanded_paths)
                             if selected_rel is not None and "/".join(folder_key) == selected_rel:
                                 selected_item = folder_item
                         parent_item = folder_item
@@ -1599,6 +1616,7 @@ class CodexHerderApp(QMainWindow):
                     _refresh_button_state()
                     return
                 asset_keys = new_asset_keys
+                expanded_paths = _expanded_tree_paths(listing, item_targets, assets_dir)
                 asset_targets.clear()
                 listing.blockSignals(True)
                 listing.clear()
@@ -1622,6 +1640,7 @@ class CodexHerderApp(QMainWindow):
                                 parent_item.addChild(folder_item)
                             folder_items[folder_key] = folder_item
                             item_targets[id(folder_item)] = assets_dir.joinpath(*folder_key)
+                            folder_item.setExpanded("/".join(folder_key) in expanded_paths)
                             if selected_rel is not None and "/".join(folder_key) == selected_rel:
                                 selected_item = folder_item
                         parent_item = folder_item
