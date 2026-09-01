@@ -540,6 +540,7 @@ class ExperimentGroupDialog(QDialog):
         self.remove_button = QPushButton("Remove Selected")
         self.move_up_button = QPushButton("↑ Move Up")
         self.move_down_button = QPushButton("↓ Move Down")
+        self.sort_button = QPushButton("Sort")
         self.save_button = QPushButton("Save Group")
         layout.addWidget(QLabel("expIDs"))
         layout.addWidget(self.exp_ids_edit)
@@ -553,12 +554,16 @@ class ExperimentGroupDialog(QDialog):
         entry_controls.addWidget(self.move_down_button)
         entry_controls.addWidget(self.remove_button)
         layout.addLayout(entry_controls)
-        layout.addWidget(self.save_button)
+        save_controls = QHBoxLayout()
+        save_controls.addWidget(self.sort_button)
+        save_controls.addWidget(self.save_button)
+        layout.addLayout(save_controls)
         self._entries: list[ExperimentRef] = list(group.experiments) if group is not None else []
         self.add_button.clicked.connect(self._add_entries)
         self.remove_button.clicked.connect(self._remove_selected)
         self.move_up_button.clicked.connect(lambda: self._move_selected(-1))
         self.move_down_button.clicked.connect(lambda: self._move_selected(1))
+        self.sort_button.clicked.connect(self._sort_entries)
         self.entries_list.currentRowChanged.connect(lambda _row: self._refresh_entry_controls())
         self.save_button.clicked.connect(self.accept)
         self._refresh_entries()
@@ -591,6 +596,17 @@ class ExperimentGroupDialog(QDialog):
         self._entries[row], self._entries[target] = self._entries[target], self._entries[row]
         self._refresh_entries()
         self.entries_list.setCurrentRow(target)
+
+    def _sort_entries(self) -> None:
+        selected = self.entries_list.currentItem()
+        selected_entry = self._entries[self.entries_list.currentRow()] if selected is not None else None
+        self._entries.sort(key=lambda entry: entry.exp_id.casefold())
+        self._refresh_entries()
+        if selected_entry is not None:
+            try:
+                self.entries_list.setCurrentRow(self._entries.index(selected_entry))
+            except ValueError:
+                pass
 
     def _refresh_entries(self) -> None:
         self.entries_list.clear()
