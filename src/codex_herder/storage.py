@@ -419,6 +419,20 @@ def upsert_experiment_group(project: Project, group: ExperimentGroup) -> None:
     save_project(project)
 
 
+def move_experiment_group(project: Project, group_name: str, direction: int) -> None:
+    if group_name not in [group.name for group in project.experiment_groups] or direction == 0:
+        return
+    index = next(index for index, group in enumerate(project.experiment_groups) if group.name == group_name)
+    target_index = index + direction
+    if target_index < 0 or target_index >= len(project.experiment_groups):
+        return
+    project.experiment_groups[index], project.experiment_groups[target_index] = (
+        project.experiment_groups[target_index],
+        project.experiment_groups[index],
+    )
+    save_project(project)
+
+
 def delete_experiment_group(project: Project, group_name: str) -> None:
     project.experiment_groups = [group for group in project.experiment_groups if group.name != group_name]
     save_project(project)
