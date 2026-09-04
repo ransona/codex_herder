@@ -85,6 +85,7 @@ from .storage import (
     load_iterations,
     load_projects,
     metadata_text,
+    move_experiment_group,
     move_analysis,
     read_notes,
     bootstrap_log_path,
@@ -537,6 +538,7 @@ class ExperimentGroupDialog(QDialog):
         self.user_combo.addItems(user_ids or [""])
         self.add_button = QPushButton("Add")
         self.entries_list = QListWidget()
+        self.entries_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.remove_button = QPushButton("Remove Selected")
         self.move_up_button = QPushButton("↑ Move Up")
         self.move_down_button = QPushButton("↓ Move Down")
@@ -565,6 +567,7 @@ class ExperimentGroupDialog(QDialog):
         self.move_down_button.clicked.connect(lambda: self._move_selected(1))
         self.sort_button.clicked.connect(self._sort_entries)
         self.entries_list.currentRowChanged.connect(lambda _row: self._refresh_entry_controls())
+        self.entries_list.itemSelectionChanged.connect(self._refresh_entry_controls)
         self.save_button.clicked.connect(self.accept)
         self._refresh_entries()
 
@@ -582,10 +585,12 @@ class ExperimentGroupDialog(QDialog):
         self._refresh_entries()
 
     def _remove_selected(self) -> None:
-        row = self.entries_list.currentRow()
-        if row < 0 or row >= len(self._entries):
+        rows = sorted((self.entries_list.row(item) for item in self.entries_list.selectedItems()), reverse=True)
+        if not rows:
             return
-        del self._entries[row]
+        for row in rows:
+            if 0 <= row < len(self._entries):
+                del self._entries[row]
         self._refresh_entries()
 
     def _move_selected(self, direction: int) -> None:
@@ -618,7 +623,7 @@ class ExperimentGroupDialog(QDialog):
         row = self.entries_list.currentRow()
         self.move_up_button.setEnabled(row > 0)
         self.move_down_button.setEnabled(0 <= row < len(self._entries) - 1)
-        self.remove_button.setEnabled(row >= 0)
+        self.remove_button.setEnabled(bool(self.entries_list.selectedItems()))
 
     def result_group(self) -> ExperimentGroup:
         return ExperimentGroup(name=self.group_name, experiments=list(self._entries))
@@ -720,10 +725,14 @@ class CodexHerderApp(QMainWindow):
         self.edit_exp_group_button = QPushButton("Edit Exp Group")
         self.rename_exp_group_button = QPushButton("Rename Exp Group")
         self.delete_exp_group_button = QPushButton("Delete Exp Group")
+        self.move_exp_group_up_button = QPushButton("↑")
+        self.move_exp_group_down_button = QPushButton("↓")
         exp_group_row.addWidget(self.new_exp_group_button, 0, 0)
         exp_group_row.addWidget(self.edit_exp_group_button, 0, 1)
         exp_group_row.addWidget(self.rename_exp_group_button, 1, 0)
         exp_group_row.addWidget(self.delete_exp_group_button, 1, 1)
+        exp_group_row.addWidget(self.move_exp_group_up_button, 2, 0)
+        exp_group_row.addWidget(self.move_exp_group_down_button, 2, 1)
         exp_group_row.setColumnStretch(0, 1)
         exp_group_row.setColumnStretch(1, 1)
         left_layout.addLayout(exp_group_row)
@@ -774,6 +783,8 @@ class CodexHerderApp(QMainWindow):
         self.edit_exp_group_button.clicked.connect(self._edit_selected_experiment_group)
         self.rename_exp_group_button.clicked.connect(self._rename_selected_experiment_group)
         self.delete_exp_group_button.clicked.connect(self._delete_selected_experiment_group)
+        self.move_exp_group_up_button.clicked.connect(lambda: self._move_selected_experiment_group(-1))
+        self.move_exp_group_down_button.clicked.connect(lambda: self._move_selected_experiment_group(1))
         self.copy_analysis_button.clicked.connect(self._copy_selected_analysis)
         self.move_up_button.clicked.connect(lambda: self._move_selected_analysis(-1))
         self.move_down_button.clicked.connect(lambda: self._move_selected_analysis(1))
@@ -922,7 +933,19 @@ class CodexHerderApp(QMainWindow):
         if selection.project is None:
             return
         self.selection_label.setText(self._selection_summary(selection))
+        self._refresh_experiment_group_move_buttons()
         self._rebuild_main_tabs(selection)
+
+    def _refresh_experiment_group_move_buttons(self) -> None:
+        group = self.current_selection.experiment_group
+        project = self.current_selection.project
+        if group is None or project is None:
+            self.move_exp_group_up_button.setEnabled(False)
+            self.move_exp_group_down_button.setEnabled(False)
+            return
+        index = next((index for index, item in enumerate(project.experiment_groups) if item.name == group.name), -1)
+        self.move_exp_group_up_button.setEnabled(index > 0)
+        self.move_exp_group_down_button.setEnabled(0 <= index < len(project.experiment_groups) - 1)
 
     def _selection_summary(self, selection: Selection) -> str:
         if selection.kind == "project" and selection.project:
@@ -1135,6 +1158,7 @@ class CodexHerderApp(QMainWindow):
                     selected_path = _current_selected_path()
                     if selected_path is not None:
                         selected_rel = str(selected_path.relative_to(assets_dir))
+                scroll_values = (listing.verticalScrollBar().value(), listing.horizontalScrollBar().value())
                 new_files = [
                     path
                     for path in list_tree_files(assets_dir)
@@ -1203,6 +1227,13 @@ class CodexHerderApp(QMainWindow):
                 page._pending_select_rel = None  # type: ignore[attr-defined]
                 _show_path(item_targets.get(id(selected_item)) if selected_item is not None else None)
                 _refresh_button_state()
+                QTimer.singleShot(
+                    0,
+                    lambda values=scroll_values: (
+                        listing.verticalScrollBar().setValue(values[0]),
+                        listing.horizontalScrollBar().setValue(values[1]),
+                    ),
+                )
 
             listing.currentItemChanged.connect(_on_item_selected)
             listing.itemDoubleClicked.connect(_on_item_double_clicked)
@@ -1607,6 +1638,7 @@ class CodexHerderApp(QMainWindow):
                     selected_path = _current_selected_path()
                     if selected_path is not None:
                         selected_rel = str(selected_path.relative_to(assets_dir))
+                scroll_values = (listing.verticalScrollBar().value(), listing.horizontalScrollBar().value())
                 all_paths = [path for path in list_tree_files(assets_dir) if path.suffix.lower() in VIDEO_EXTENSIONS]
                 groups: dict[tuple[str, str], list[Path]] = {}
                 for path in all_paths:
@@ -1688,6 +1720,13 @@ class CodexHerderApp(QMainWindow):
                 page._pending_select_rel = None  # type: ignore[attr-defined]
                 _show_video_path(item_targets.get(id(selected_item)) if selected_item is not None else None)
                 _refresh_button_state()
+                QTimer.singleShot(
+                    0,
+                    lambda values=scroll_values: (
+                        listing.verticalScrollBar().setValue(values[0]),
+                        listing.horizontalScrollBar().setValue(values[1]),
+                    ),
+                )
 
             def _update_minmax_labels() -> None:
                 data_min = float(getattr(page, "_video_data_min", 0.0))
@@ -1910,6 +1949,13 @@ class CodexHerderApp(QMainWindow):
             return
         delete_experiment_group(selection.project, selection.experiment_group.name)
         self.current_selection = Selection(kind="project", project=selection.project)
+        self.reload_workspace()
+
+    def _move_selected_experiment_group(self, direction: int) -> None:
+        selection = self.current_selection
+        if selection.project is None or selection.experiment_group is None:
+            return
+        move_experiment_group(selection.project, selection.experiment_group.name, direction)
         self.reload_workspace()
 
     def _launch_new_session(self) -> None:
