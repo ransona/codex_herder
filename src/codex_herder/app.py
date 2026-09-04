@@ -78,6 +78,7 @@ from .storage import (
     delete_experiment_group,
     delete_analysis,
     delete_iteration,
+    delete_project,
     ensure_app_roots,
     list_files,
     list_tree_files,
@@ -689,7 +690,9 @@ class CodexHerderApp(QMainWindow):
 
         project_row = QHBoxLayout()
         self.new_project_button = QPushButton("New Project")
+        self.delete_project_button = QPushButton("Delete Project")
         project_row.addWidget(self.new_project_button)
+        project_row.addWidget(self.delete_project_button)
         left_layout.addLayout(project_row)
 
         left_layout.addWidget(QLabel("Projects"))
@@ -778,6 +781,7 @@ class CodexHerderApp(QMainWindow):
         self.experiment_group_list.itemClicked.connect(self._experiment_group_item_selected)
         self.experiment_group_list.itemDoubleClicked.connect(self._edit_selected_experiment_group)
         self.new_project_button.clicked.connect(self._create_project_dialog)
+        self.delete_project_button.clicked.connect(self._delete_selected_project)
         self.new_analysis_button.clicked.connect(self._create_analysis_dialog)
         self.new_exp_group_button.clicked.connect(self._create_experiment_group_dialog)
         self.edit_exp_group_button.clicked.connect(self._edit_selected_experiment_group)
@@ -1852,6 +1856,25 @@ class CodexHerderApp(QMainWindow):
         project = create_project(label.strip(), label.strip())
         self.selected_project_id = project.project_id
         self.current_selection = Selection(kind="project", project=project)
+        self.reload_workspace()
+
+    def _delete_selected_project(self) -> None:
+        project = self._selected_project()
+        if project is None:
+            QMessageBox.information(self, "Delete Project", "Select a project first.")
+            return
+        confirmation = QMessageBox.warning(
+            self,
+            "Delete Project",
+            f"Delete project '{project.title}' and all of its analyses and files?\n\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmation != QMessageBox.Yes:
+            return
+        delete_project(project)
+        self.selected_project_id = None
+        self.current_selection = Selection(kind="none")
         self.reload_workspace()
 
     def _create_analysis_dialog(self) -> None:

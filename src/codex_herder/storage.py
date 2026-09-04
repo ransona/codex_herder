@@ -305,6 +305,11 @@ def create_project(project_id: str, title: str, purpose: str = "", workspace_roo
     return project
 
 
+def delete_project(project: Project) -> None:
+    if project.path.exists():
+        shutil.rmtree(project.path)
+
+
 def create_analysis(
     project: Project,
     analysis_id: str,
