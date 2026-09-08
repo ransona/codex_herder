@@ -44,12 +44,18 @@ If any required iteration directories or files are missing, create them before d
 
 - Put code, scripts, notebooks, configs, and helper files in `code/`.
 - Put viewable figures in `output/figures/`.
+- Every generated figure must have a sidecar Markdown file with the same base name in the same folder (for example, `response_curve.png` and `response_curve.md`).
+- Each figure sidecar must begin with a brief summary of what is plotted, followed by a detailed reproducibility description covering source data, processing steps, code or commands, parameters, units, environment, code version, and generation date and time.
+- If a figure is changed or regenerated, update its sidecar with a dated explanation of what changed and why.
 - Organize figures hierarchically inside `output/figures/` when related outputs belong together.
 - Use clear subfolder names so the figure folder structure reflects logical groups of related outputs within the iteration.
 - When making multiple iterative small changes to an existing figure, keep the same base figure name and append a version suffix of the form `Vx`, where `x` is the version number.
 - Before creating a new versioned figure file, ask the user whether they want a new version.
 - If the user does not want a new version, assume the latest version should be overwritten rather than creating an additional file.
 - Put viewable videos in `output/videos/`.
+- Every generated video or video dataset must have a sidecar Markdown file with the same base name in the same folder (for example, `activity_movie.mp4` and `activity_movie.md`).
+- Each video sidecar must begin with a brief summary of the content, followed by a detailed reproducibility description covering source data, processing steps, code or commands, parameters, units, frame rate, dimensions, environment, code version, and generation date and time.
+- If a video or video dataset is changed or regenerated, update its sidecar with a dated explanation of what changed and why.
 - Organize videos hierarchically inside `output/videos/` using the same grouping conventions as figures when related outputs belong together.
 - Use clear subfolder names so the video folder structure reflects logical groups of related outputs within the iteration.
 - Save videos as both a `.npy` file and a matching `.mp4` file with the same base name.
@@ -61,11 +67,11 @@ If any required iteration directories or files are missing, create them before d
 - Default video output format should be `mp4`.
 - Put derived intermediate data in `output/processed_data/`.
 - Give reusable intermediate data specific, descriptive names that identify the processing stage or data type (for example, `average_responses_by_condition`).
-- Store each named processed-data result in its own folder under `output/processed_data/`.
-- Every processed-data folder must contain a `description.md` file.
-- `description.md` must explain exactly how the processed-data files were generated, including source inputs, processing code or commands, transformations, output schema, and the date and time of generation.
-- If any processed-data file is changed, update the same `description.md` with the date and time and a clear explanation of what changed and why.
-- Keep a dated change history in `description.md`; do not silently overwrite the processing description.
+- Store each named processed-data result in its own subfolder under `output/processed_data/`.
+- Each specific processed-data subfolder must contain its own `description.md` file alongside that subfolder's data files. A general description at the `output/processed_data/` root does not satisfy this requirement.
+- The `description.md` inside each specific processed-data subfolder must contain all information required to reproduce the files in that subfolder exactly. Include the source project, analysis, and iteration; source experiment IDs and input file paths; processing scripts, notebooks, functions, or complete commands; code version or Git commit; environment and package versions; all parameters, filters, exclusions, units, and random seeds; transformations in execution order; output filenames and schema; and the date and time of generation.
+- If any file in a specific processed-data subfolder is changed, update that same subfolder's `description.md` with the date and time and a clear explanation of what changed and why.
+- Keep a dated change history in each subfolder's `description.md`; do not silently overwrite the processing description.
 - Put statistical outputs, summaries, reports, and result tables in `output/stats/`.
 - Put run logs and execution history in `logs/`.
 - Update `notes.md` as work progresses.

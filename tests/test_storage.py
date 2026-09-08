@@ -160,10 +160,14 @@ def test_validate_iteration_checks_processed_data_descriptions(tmp_path: Path) -
     iteration = create_iteration(project, analysis, "iter_001")
     dataset_path = iteration.path / "output" / "processed_data" / "trial_aligned_responses"
     dataset_path.mkdir()
+    (iteration.path / "output" / "figures" / "response_curve.png").write_bytes(b"figure")
 
     errors = validate_iteration(iteration)
 
-    assert errors == ["Missing description.md: output/processed_data/trial_aligned_responses/"]
+    assert errors == [
+        "Missing description.md: output/processed_data/trial_aligned_responses/",
+        "Missing description: output/figures/response_curve.md",
+    ]
 
 
 def test_next_alt_session_id(tmp_path: Path) -> None:

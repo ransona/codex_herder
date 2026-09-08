@@ -673,6 +673,7 @@ class CodexHerderApp(QMainWindow):
         self._tmux_dialog: TmuxSessionsDialog | None = None
         self._trust_auto_sent_at: dict[str, float] = {}
         self._pending_session_verifications: dict[str, dict[str, object]] = {}
+        self._processed_data_clipboard: list[Path] = []
 
         self._build_ui()
         self._asset_refresh_timer = QTimer(self)
@@ -1051,6 +1052,104 @@ class CodexHerderApp(QMainWindow):
         layout.addWidget(copy_button)
         return page
 
+    def _copy_processed_data(self, paths: list[Path]) -> None:
+        self._processed_data_clipboard = [path for path in paths if path.exists()]
+        if not self._processed_data_clipboard:
+            QMessageBox.information(self, "Copy Processed Data", "Select at least one processed-data set first.")
+            return
+        QMessageBox.information(
+            self,
+            "Copy Processed Data",
+            f"Copied {len(self._processed_data_clipboard)} processed-data set(s). Navigate to another iteration and click Paste.",
+        )
+
+    def _paste_processed_data(self, iteration: Iteration) -> None:
+        sources = [path for path in self._processed_data_clipboard if path.exists()]
+        if not sources:
+            QMessageBox.information(self, "Paste Processed Data", "There is no processed data to paste.")
+            return
+        destination_root = iteration.path / "output" / "processed_data"
+        destination_root.mkdir(parents=True, exist_ok=True)
+        destinations = [destination_root / source.name for source in sources]
+        collisions = [path.name for path in destinations if path.exists()]
+        if collisions:
+            answer = QMessageBox.question(
+                self,
+                "Replace Processed Data",
+                "These datasets already exist and will be replaced:\n\n" + "\n".join(collisions),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        def _files(path: Path) -> list[Path]:
+            return [item for item in path.rglob("*") if item.is_file()] if path.is_dir() else [path]
+
+        source_files = [item for source in sources for item in _files(source)]
+        total_bytes = max(1, sum(item.stat().st_size for item in source_files))
+        progress = QProgressDialog("Copying processed data...", "Cancel", 0, total_bytes, self)
+        progress.setWindowTitle("Paste Processed Data")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        copied_bytes = 0
+        try:
+            for source, destination in zip(sources, destinations):
+                if destination.exists():
+                    if destination.is_dir():
+                        shutil.rmtree(destination)
+                    else:
+                        destination.unlink()
+                if source.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    for source_file in source.rglob("*"):
+                        if progress.wasCanceled():
+                            return
+                        if source_file.is_dir():
+                            (destination / source_file.relative_to(source)).mkdir(parents=True, exist_ok=True)
+                            continue
+                        target_file = destination / source_file.relative_to(source)
+                        target_file.parent.mkdir(parents=True, exist_ok=True)
+                        with source_file.open("rb") as source_handle, target_file.open("wb") as target_handle:
+                            while True:
+                                chunk = source_handle.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                target_handle.write(chunk)
+                                copied_bytes += len(chunk)
+                                progress.setValue(copied_bytes)
+                                QApplication.processEvents()
+                                if progress.wasCanceled():
+                                    return
+                        shutil.copystat(source_file, target_file)
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with source.open("rb") as source_handle, destination.open("wb") as target_handle:
+                        while True:
+                            chunk = source_handle.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            target_handle.write(chunk)
+                            copied_bytes += len(chunk)
+                            progress.setValue(copied_bytes)
+                            QApplication.processEvents()
+                            if progress.wasCanceled():
+                                return
+                    shutil.copystat(source, destination)
+        except OSError as exc:
+            QMessageBox.critical(self, "Paste Processed Data", f"Could not complete the transfer:\n\n{exc}")
+            return
+        finally:
+            progress.close()
+        current_tab = self._current_tab_label()
+        self.reload_workspace()
+        if current_tab is not None:
+            for index in range(self.content_tabs.count()):
+                if self.content_tabs.tabText(index) == current_tab:
+                    self.content_tabs.setCurrentIndex(index)
+                    break
+        QMessageBox.information(self, "Paste Processed Data", f"Transferred {len(sources)} processed-data set(s).")
+
     def _overview_tab(self, selection: Selection) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -1126,12 +1225,21 @@ class CodexHerderApp(QMainWindow):
             left_layout.setContentsMargins(0, 0, 0, 0)
             listing = QTreeWidget()
             listing.setHeaderLabels(["Figure"])
+            figure_description = QPlainTextEdit()
+            figure_description.setReadOnly(True)
+            figure_description.setPlaceholderText("Select a figure to view its description.")
+            figure_description.setMinimumHeight(80)
+            figure_list_splitter = QSplitter(Qt.Vertical)
+            figure_list_splitter.addWidget(listing)
+            figure_list_splitter.addWidget(figure_description)
+            figure_list_splitter.setStretchFactor(0, 2)
+            figure_list_splitter.setStretchFactor(1, 1)
             button_row = QHBoxLayout()
             rename_button = QPushButton("Rename")
             delete_button = QPushButton("Delete")
             button_row.addWidget(rename_button)
             button_row.addWidget(delete_button)
-            left_layout.addWidget(listing, 1)
+            left_layout.addWidget(figure_list_splitter, 1)
             left_layout.addLayout(button_row)
             preview = FigurePreviewLabel("No figure selected")
             preview.set_open_callback(self._open_figure_window)
@@ -1149,10 +1257,18 @@ class CodexHerderApp(QMainWindow):
             page._pending_select_rel = None  # type: ignore[attr-defined]
 
             def _show_path(path: Path | None) -> None:
+                figure_description.clear()
                 if path is None or path.is_dir():
+                    if path is not None and path.is_dir() and (path / "description.md").is_file():
+                        figure_description.setPlainText((path / "description.md").read_text(encoding="utf-8", errors="replace"))
                     preview.set_figure_path(None)
                     preview.clear_source_pixmap("No figure selected" if path is None else str(path.relative_to(assets_dir)))
                     return
+                description_path = path.with_suffix(".md")
+                if description_path.is_file():
+                    figure_description.setPlainText(description_path.read_text(encoding="utf-8", errors="replace"))
+                else:
+                    figure_description.setPlainText("No description file found for this figure.")
                 preview.set_figure_path(path)
                 if path.suffix.lower() in IMAGE_EXTENSIONS:
                     pixmap = QPixmap(str(path))
@@ -1856,17 +1972,29 @@ class CodexHerderApp(QMainWindow):
             display_name = lambda path: str(path.relative_to(source_dir))
         processed_delete_button: QPushButton | None = None
         processed_new_button: QPushButton | None = None
+        processed_copy_button: QPushButton | None = None
+        processed_paste_button: QPushButton | None = None
+        processed_rename_button: QPushButton | None = None
         if category == "processed":
             left_panel = page.layout().itemAt(0).widget()  # type: ignore[union-attr]
             if isinstance(left_panel, QWidget):
                 processed_new_button = QPushButton("New Dataset")
+                processed_copy_button = QPushButton("Copy Selected")
+                processed_paste_button = QPushButton("Paste")
+                processed_rename_button = QPushButton("Rename")
                 processed_delete_button = QPushButton("Delete Selected")
                 processed_delete_button.setEnabled(False)
+                processed_rename_button.setEnabled(False)
                 left_panel.layout().addWidget(processed_new_button)  # type: ignore[union-attr]
+                left_panel.layout().addWidget(processed_copy_button)  # type: ignore[union-attr]
+                left_panel.layout().addWidget(processed_paste_button)  # type: ignore[union-attr]
+                left_panel.layout().addWidget(processed_rename_button)  # type: ignore[union-attr]
                 left_panel.layout().addWidget(processed_delete_button)  # type: ignore[union-attr]
         files = source_loader()
         for path in files:
-            listing.addItem(display_name(path))
+            item = QListWidgetItem(display_name(path))
+            item.setData(Qt.UserRole, str(path))
+            listing.addItem(item)
         def _show(row: int) -> None:
             if row < 0 or row >= len(files):
                 preview.clear()
@@ -1899,9 +2027,39 @@ class CodexHerderApp(QMainWindow):
 
             def _update_processed_delete_state() -> None:
                 processed_delete_button.setEnabled(bool(listing.selectedItems()))
+                processed_rename_button.setEnabled(len(listing.selectedItems()) == 1)  # type: ignore[union-attr]
+
+            def _copy_processed() -> None:
+                self._copy_processed_data(
+                    [Path(item.data(Qt.UserRole)) for item in listing.selectedItems() if item.data(Qt.UserRole)]
+                )
+
+            def _rename_processed() -> None:
+                selected = [Path(item.data(Qt.UserRole)) for item in listing.selectedItems() if item.data(Qt.UserRole)]
+                if len(selected) != 1:
+                    QMessageBox.information(self, "Rename Processed Data", "Select exactly one dataset to rename.")
+                    return
+                source = selected[0]
+                new_name, ok = QInputDialog.getText(self, "Rename Processed Data", "New name:", text=source.name)
+                if not ok:
+                    return
+                new_name = new_name.strip()
+                if not new_name or new_name in {".", ".."} or "/" in new_name or "\\" in new_name:
+                    QMessageBox.warning(self, "Rename Processed Data", "Use a non-empty name without path separators.")
+                    return
+                destination = source.parent / new_name
+                if destination.exists():
+                    QMessageBox.warning(self, "Rename Processed Data", f"{new_name} already exists.")
+                    return
+                try:
+                    source.rename(destination)
+                except OSError as exc:
+                    QMessageBox.critical(self, "Rename Processed Data", str(exc))
+                    return
+                _refresh()
 
             def _delete_processed() -> None:
-                targets = [files[item.row()] for item in listing.selectedItems() if 0 <= item.row() < len(files)]
+                targets = [Path(item.data(Qt.UserRole)) for item in listing.selectedItems() if item.data(Qt.UserRole)]
                 if not targets:
                     return
                 labels = ", ".join(path.name for path in targets)
@@ -1917,6 +2075,9 @@ class CodexHerderApp(QMainWindow):
             listing.setSelectionMode(QListWidget.ExtendedSelection)
             listing.itemSelectionChanged.connect(_update_processed_delete_state)
             processed_new_button.clicked.connect(_create_processed_dataset)  # type: ignore[union-attr]
+            processed_copy_button.clicked.connect(_copy_processed)  # type: ignore[union-attr]
+            processed_paste_button.clicked.connect(lambda: self._paste_processed_data(iteration))  # type: ignore[union-attr]
+            processed_rename_button.clicked.connect(_rename_processed)  # type: ignore[union-attr]
             processed_delete_button.clicked.connect(_delete_processed)
         def _refresh() -> None:
             nonlocal files
@@ -1932,8 +2093,10 @@ class CodexHerderApp(QMainWindow):
             files = new_files
             listing.blockSignals(True)
             listing.clear()
-            for key in new_keys:
-                listing.addItem(key)
+            for path, key in zip(new_files, new_keys):
+                item = QListWidgetItem(key)
+                item.setData(Qt.UserRole, str(path))
+                listing.addItem(item)
             target_row = -1
             if selected_key is not None:
                 for idx, key in enumerate(new_keys):

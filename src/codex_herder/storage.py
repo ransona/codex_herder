@@ -436,6 +436,16 @@ def validate_iteration(iteration: Iteration) -> list[str]:
         for dataset_path in sorted(processed_root.iterdir(), key=lambda path: path.name.lower()):
             if dataset_path.is_dir() and not (dataset_path / "description.md").is_file():
                 errors.append(f"Missing description.md: output/processed_data/{dataset_path.name}/")
+    for category, extensions in {
+        "figures": {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".svg"},
+        "videos": {".mp4", ".mov", ".avi", ".mkv", ".webm", ".npy"},
+    }.items():
+        root = iteration.path / "output" / category
+        if root.is_dir():
+            for media_path in root.rglob("*"):
+                if media_path.is_file() and media_path.suffix.lower() in extensions:
+                    if not media_path.with_suffix(".md").is_file():
+                        errors.append(f"Missing description: {media_path.with_suffix('.md').relative_to(iteration.path)}")
     return errors
 
 
