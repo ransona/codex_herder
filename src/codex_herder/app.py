@@ -1053,7 +1053,15 @@ class CodexHerderApp(QMainWindow):
         return page
 
     def _copy_processed_data(self, paths: list[Path]) -> None:
-        self._processed_data_clipboard = [path for path in paths if path.exists()]
+        copied_paths: list[Path] = []
+        for path in paths:
+            if not path.exists():
+                continue
+            copied_paths.append(path)
+            sidecar = path.with_suffix(".md") if path.is_file() else None
+            if sidecar is not None and sidecar.is_file() and sidecar not in copied_paths:
+                copied_paths.append(sidecar)
+        self._processed_data_clipboard = copied_paths
         if not self._processed_data_clipboard:
             QMessageBox.information(self, "Copy Processed Data", "Select at least one processed-data set first.")
             return
@@ -1141,6 +1149,19 @@ class CodexHerderApp(QMainWindow):
             return
         finally:
             progress.close()
+        missing_descriptions = [
+            destination / "description.md"
+            for source, destination in zip(sources, destinations)
+            if source.is_dir() and (source / "description.md").is_file() and not (destination / "description.md").is_file()
+        ]
+        if missing_descriptions:
+            QMessageBox.critical(
+                self,
+                "Paste Processed Data",
+                "The transfer completed but these descriptions were not copied:\n\n"
+                + "\n".join(str(path) for path in missing_descriptions),
+            )
+            return
         current_tab = self._current_tab_label()
         self.reload_workspace()
         if current_tab is not None:
