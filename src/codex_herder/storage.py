@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -388,6 +389,54 @@ def create_iteration(
         analysis.iteration_ids.append(iteration_id)
         save_analysis(analysis)
     return iteration
+
+
+def create_processed_data_dataset(iteration: Iteration, dataset_name: str) -> Path:
+    """Create a named processed-data folder with its required provenance template."""
+    name = dataset_name.strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError("Processed-data dataset names must be a non-empty folder name.")
+    dataset_path = iteration.path / "output" / "processed_data" / name
+    if dataset_path.exists():
+        raise FileExistsError(f"Processed-data dataset already exists: {name}")
+    dataset_path.mkdir(parents=True)
+    timestamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    (dataset_path / "description.md").write_text(
+        "# Dataset description\n\n"
+        "## Generated\n"
+        f"Date and time: {timestamp}\n\n"
+        "## Source inputs\n"
+        "Describe the source files, experiment groups, and any filters used.\n\n"
+        "## Processing code or command\n"
+        "Record the script, notebook, function, or command used to generate this dataset.\n\n"
+        "## Transformations\n"
+        "Describe each processing step in order.\n\n"
+        "## Output files and schema\n"
+        "List the files in this folder and describe their columns, keys, shapes, and units.\n\n"
+        "## Change history\n\n"
+        f"- {timestamp}: Initial dataset folder created.\n",
+        encoding="utf-8",
+    )
+    return dataset_path
+
+
+def validate_iteration(iteration: Iteration) -> list[str]:
+    """Return actionable validation errors for an iteration, or an empty list."""
+    errors: list[str] = []
+    for required_dir in REQUIRED_ITERATION_DIRS:
+        path = iteration.path / required_dir
+        if not path.is_dir():
+            errors.append(f"Missing directory: {required_dir}/")
+    for required_file in (iteration.task_path, iteration.notes_path, iteration.metadata_path):
+        if not required_file.is_file():
+            errors.append(f"Missing file: {required_file.relative_to(iteration.path)}")
+
+    processed_root = iteration.path / "output" / "processed_data"
+    if processed_root.is_dir():
+        for dataset_path in sorted(processed_root.iterdir(), key=lambda path: path.name.lower()):
+            if dataset_path.is_dir() and not (dataset_path / "description.md").is_file():
+                errors.append(f"Missing description.md: output/processed_data/{dataset_path.name}/")
+    return errors
 
 
 def delete_iteration(analysis: Analysis, iteration: Iteration) -> None:

@@ -20,12 +20,14 @@ from codex_herder.storage import (
     copy_analysis,
     create_analysis,
     create_iteration,
+    create_processed_data_dataset,
     create_project,
     delete_analysis,
     delete_iteration,
     load_analyses,
     load_projects,
     move_analysis,
+    validate_iteration,
     upsert_session_link,
 )
 
@@ -123,6 +125,45 @@ def test_bootstrap_message_includes_required_context(tmp_path: Path) -> None:
     assert str(project.path) in message
     assert "Lab Data Access" in message
     assert "Iteration: iter_001" in message
+    assert "Rename this thread to: Goal" in message
+    assert f"ITERATION FOLDER = {iteration.path}" in message
+    assert "Do not make suggestions at startup of chat." in message
+    assert "output/processed_data/" in message
+    assert "description.md" in message
+    assert "date and time" in message
+    assert "project_id, analysis_id, and iteration_id" in message
+    assert "Do not hardcode absolute or project-specific paths" in message
+    assert "Do not use processed data from other iterations, analyses, or projects by default" in message
+
+
+def test_create_processed_data_dataset_writes_description_template(tmp_path: Path) -> None:
+    workspace = tmp_path / "projects"
+    project = create_project("project_903b", "Processed", workspace_root_path=workspace)
+    analysis = create_analysis(project, "analysis_001", "Goal")
+    iteration = create_iteration(project, analysis, "iter_001")
+
+    dataset_path = create_processed_data_dataset(iteration, "average_responses_by_condition")
+
+    description = dataset_path / "description.md"
+    assert description.exists()
+    body = description.read_text(encoding="utf-8")
+    assert "Source inputs" in body
+    assert "Processing code or command" in body
+    assert "Change history" in body
+    assert "Initial dataset folder created" in body
+
+
+def test_validate_iteration_checks_processed_data_descriptions(tmp_path: Path) -> None:
+    workspace = tmp_path / "projects"
+    project = create_project("project_903c", "Validation", workspace_root_path=workspace)
+    analysis = create_analysis(project, "analysis_001", "Goal")
+    iteration = create_iteration(project, analysis, "iter_001")
+    dataset_path = iteration.path / "output" / "processed_data" / "trial_aligned_responses"
+    dataset_path.mkdir()
+
+    errors = validate_iteration(iteration)
+
+    assert errors == ["Missing description.md: output/processed_data/trial_aligned_responses/"]
 
 
 def test_next_alt_session_id(tmp_path: Path) -> None:
@@ -172,8 +213,9 @@ def test_session_specs_use_explicit_terminal_safe_codex_command(tmp_path: Path, 
     assert "codex-herder-analysis-context" in new_spec.command[-1]
     assert f"Project root: {project.path}" in new_spec.command[-1]
     assert "Project: project_906 - Launch" in new_spec.command[-1]
-    assert "Do not make suggestions yet." in new_spec.command[-1]
-    assert f"only write inside this iteration folder: {iteration.path}" in new_spec.command[-1]
+    assert "Do not make suggestions at startup of chat." in new_spec.command[-1]
+    assert f"ITERATION FOLDER = {iteration.path}" in new_spec.command[-1]
+    assert "only write inside the ITERATION FOLDER." in new_spec.command[-1]
     assert "Store videos inside output/videos/" in new_spec.command[-1]
     assert "Default video output format should be mp4." in new_spec.command[-1]
     assert "Preferred conda environment for this session: sci" in new_spec.command[-1]

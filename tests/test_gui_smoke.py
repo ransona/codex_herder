@@ -33,11 +33,10 @@ def test_gui_loads_sample_workspace(monkeypatch) -> None:
         assert window.project_list.item(0).text() == "project_a"
         assert window.tree.topLevelItemCount() == 1
         assert window.tree.topLevelItem(0).text(0) == "analysis_a"
-        assert window.content_tabs.tabText(window.content_tabs.count() - 1) == "CLI"
+        assert window.content_tabs.tabText(window.content_tabs.count() - 1) == "Notes"
         labels = [window.content_tabs.tabText(i) for i in range(window.content_tabs.count())]
         assert "Overview" in labels
         assert "Notes" in labels
-        assert "Metadata" in labels
     finally:
         window.close()
 

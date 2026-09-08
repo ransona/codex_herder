@@ -57,6 +57,7 @@ except Exception:  # pragma: no cover
 
 from .models import Analysis, ExperimentGroup, ExperimentRef, Iteration, Project, SessionLink
 from .sessions import (
+    build_bootstrap_message,
     build_new_session_spec,
     build_resume_session_spec,
     capture_new_codex_session,
@@ -74,6 +75,7 @@ from .storage import (
     create_analysis,
     copy_analysis,
     create_iteration,
+    create_processed_data_dataset,
     create_project,
     delete_experiment_group,
     delete_analysis,
@@ -95,6 +97,7 @@ from .storage import (
     set_notes,
     upsert_experiment_group,
     upsert_session_link,
+    validate_iteration,
     write_metadata_text,
 )
 from .tmux_manager import (
@@ -821,11 +824,15 @@ class CodexHerderApp(QMainWindow):
     def _build_text_preview(self, empty_text: str) -> tuple[QListWidget, QPlainTextEdit, QWidget]:
         page = QWidget()
         layout = QHBoxLayout(page)
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         listing = QListWidget()
         preview = QPlainTextEdit()
         preview.setReadOnly(True)
         preview.setPlaceholderText(empty_text)
-        layout.addWidget(listing, 1)
+        left_layout.addWidget(listing, 1)
+        layout.addWidget(left_panel, 1)
         layout.addWidget(preview, 3)
         return listing, preview, page
 
@@ -987,15 +994,62 @@ class CodexHerderApp(QMainWindow):
             self.content_tabs.addTab(self._iteration_files_tab(selection.iteration, "processed"), "Processed Data")
             self.content_tabs.addTab(self._iteration_files_tab(selection.iteration, "stats"), "Stats")
             self.content_tabs.addTab(self._iteration_files_tab(selection.iteration, "code"), "Code")
-            self.content_tabs.addTab(self._editable_text_tab("Task", selection.iteration.task_path), "Task")
-        notes_path, metadata_path, _ = self._selected_paths(selection)
+            self.content_tabs.addTab(self._codex_gui_tab(selection.project, selection.analysis, selection.iteration), "Codex")
+        notes_path, _metadata_path, _ = self._selected_paths(selection)
         if notes_path is not None:
             self.content_tabs.addTab(self._editable_text_tab("Notes", notes_path), "Notes")
-        if metadata_path is not None:
-            self.content_tabs.addTab(self._editable_text_tab("Metadata", metadata_path, yaml_mode=True), "Metadata")
-        self.content_tabs.addTab(self.cli_tab, "CLI")
-        if current is self.cli_tab:
-            self.content_tabs.setCurrentWidget(self.cli_tab)
+        # CLI and metadata remain available internally for compatibility, but are
+        # intentionally not exposed as primary analysis tabs.
+        if current is self.cli_tab and selection.iteration:
+            for index in range(self.content_tabs.count()):
+                if self.content_tabs.tabText(index) == "Codex":
+                    self.content_tabs.setCurrentIndex(index)
+                    break
+
+    def _codex_gui_prompt(self, project: Project, analysis: Analysis, iteration: Iteration) -> str:
+        task = iteration.task_path.read_text(encoding="utf-8", errors="replace") if iteration.task_path.exists() else ""
+        session = next(
+            (link for link in analysis.linked_codex_sessions if link.session_id == iteration.codex_session),
+            None,
+        )
+        bootstrap = build_bootstrap_message(
+            project,
+            analysis,
+            iteration,
+            task,
+            session_id=iteration.codex_session or analysis.current_session,
+            conda_env=session.conda_env if session else "codex_herder",
+        )
+        return (
+            "Start the ChatGPT GUI Codex task in the remote project using this exact working directory "
+            f"(not the repository parent): {iteration.path}\n"
+            "Then paste the complete prompt below. It mirrors the Codex CLI session bootstrap.\n\n"
+            f"{bootstrap}"
+        )
+
+    def _codex_gui_tab(self, project: Project, analysis: Analysis, iteration: Iteration) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        instructions = QLabel(
+            "Start a Codex task in the ChatGPT GUI remote project using this iteration directory, "
+            "then paste the prompt below."
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+
+        path_label = QLabel(f"Working directory: {iteration.path}")
+        path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(path_label)
+
+        prompt = QPlainTextEdit()
+        prompt.setReadOnly(True)
+        prompt.setPlainText(self._codex_gui_prompt(project, analysis, iteration))
+        layout.addWidget(prompt)
+
+        copy_button = QPushButton("Copy GUI Prompt")
+        copy_button.clicked.connect(lambda: QApplication.clipboard().setText(prompt.toPlainText()))
+        layout.addWidget(copy_button)
+        return page
 
     def _overview_tab(self, selection: Selection) -> QWidget:
         page = QWidget()
@@ -1018,6 +1072,12 @@ class CodexHerderApp(QMainWindow):
             lines.append(f"Tmux list command: {codex_herder_tmux_wrapper_command()} ls")
         if selection.iteration:
             lines.append(f"Iteration status: {selection.iteration.status}")
+            validation_errors = validate_iteration(selection.iteration)
+            lines.append(
+                f"Iteration validation: {'OK' if not validation_errors else f'{len(validation_errors)} issue(s)'}"
+            )
+            if validation_errors:
+                lines.extend(f"- {error}" for error in validation_errors)
         if selection.experiment_group:
             lines.append(f"Experiments in group: {len(selection.experiment_group.experiments)}")
             for entry in selection.experiment_group.experiments:
@@ -1027,6 +1087,18 @@ class CodexHerderApp(QMainWindow):
             lines.append(f"userID: {selection.experiment_entry.user_id or 'none'}")
         summary.setPlainText("\n".join(lines))
         layout.addWidget(summary)
+        if selection.iteration:
+            validate_button = QPushButton("Validate Iteration")
+
+            def _show_validation() -> None:
+                errors = validate_iteration(selection.iteration)  # type: ignore[arg-type]
+                if errors:
+                    QMessageBox.warning(self, "Iteration Validation", "The iteration has issues:\n\n" + "\n".join(errors))
+                else:
+                    QMessageBox.information(self, "Iteration Validation", "The iteration structure is complete.")
+
+            validate_button.clicked.connect(_show_validation)
+            layout.addWidget(validate_button)
         return page
 
     def _analysis_sessions_tab(self, analysis: Analysis) -> QWidget:
@@ -1769,7 +1841,10 @@ class CodexHerderApp(QMainWindow):
         listing, preview, page = self._build_text_preview("")
         if category == "processed":
             source_dir = iteration.path / "output" / "processed_data"
-            source_loader = lambda: list_files(source_dir)
+            source_loader = lambda: sorted(
+                (path for path in source_dir.iterdir() if path.is_dir() or path.is_file()),
+                key=lambda path: path.name.lower(),
+            ) if source_dir.exists() else []
             display_name = lambda path: path.name
         elif category == "stats":
             source_dir = iteration.path / "output" / "stats"
@@ -1779,6 +1854,16 @@ class CodexHerderApp(QMainWindow):
             source_dir = iteration.path / "code"
             source_loader = lambda: list_tree_files(source_dir)
             display_name = lambda path: str(path.relative_to(source_dir))
+        processed_delete_button: QPushButton | None = None
+        processed_new_button: QPushButton | None = None
+        if category == "processed":
+            left_panel = page.layout().itemAt(0).widget()  # type: ignore[union-attr]
+            if isinstance(left_panel, QWidget):
+                processed_new_button = QPushButton("New Dataset")
+                processed_delete_button = QPushButton("Delete Selected")
+                processed_delete_button.setEnabled(False)
+                left_panel.layout().addWidget(processed_new_button)  # type: ignore[union-attr]
+                left_panel.layout().addWidget(processed_delete_button)  # type: ignore[union-attr]
         files = source_loader()
         for path in files:
             listing.addItem(display_name(path))
@@ -1787,11 +1872,52 @@ class CodexHerderApp(QMainWindow):
                 preview.clear()
                 return
             path = files[row]
+            if path.is_dir():
+                description = path / "description.md"
+                preview.setPlainText(
+                    description.read_text(encoding="utf-8", errors="replace")
+                    if description.exists()
+                    else "No description.md found in this dataset folder."
+                )
+                return
             if path.suffix.lower() in PREVIEW_EXTENSIONS:
                 preview.setPlainText(path.read_text(encoding="utf-8", errors="replace"))
             else:
                 preview.setPlainText(path.name)
         listing.currentRowChanged.connect(_show)
+        if processed_delete_button is not None:
+            def _create_processed_dataset() -> None:
+                name, ok = QInputDialog.getText(self, "New Processed Dataset", "Dataset folder name:")
+                if not ok or not name.strip():
+                    return
+                try:
+                    create_processed_data_dataset(iteration, name)
+                except (FileExistsError, ValueError) as exc:
+                    QMessageBox.warning(self, "New Processed Dataset", str(exc))
+                    return
+                _refresh()
+
+            def _update_processed_delete_state() -> None:
+                processed_delete_button.setEnabled(bool(listing.selectedItems()))
+
+            def _delete_processed() -> None:
+                targets = [files[item.row()] for item in listing.selectedItems() if 0 <= item.row() < len(files)]
+                if not targets:
+                    return
+                labels = ", ".join(path.name for path in targets)
+                if QMessageBox.question(self, "Delete Processed Data", f"Delete selected data?\n\n{labels}") != QMessageBox.Yes:
+                    return
+                for target in targets:
+                    if target.is_dir():
+                        shutil.rmtree(target)
+                    else:
+                        target.unlink(missing_ok=True)
+                _refresh()
+
+            listing.setSelectionMode(QListWidget.ExtendedSelection)
+            listing.itemSelectionChanged.connect(_update_processed_delete_state)
+            processed_new_button.clicked.connect(_create_processed_dataset)  # type: ignore[union-attr]
+            processed_delete_button.clicked.connect(_delete_processed)
         def _refresh() -> None:
             nonlocal files
             selected_key = display_name(files[listing.currentRow()]) if 0 <= listing.currentRow() < len(files) else None
@@ -1897,7 +2023,15 @@ class CodexHerderApp(QMainWindow):
         self.selected_project_id = project.project_id
         self.current_selection = Selection(kind="iteration", project=project, analysis=analysis, iteration=iteration)
         self.reload_workspace()
-        if self.current_selection.analysis is not None:
+        choice_box = QMessageBox(self)
+        choice_box.setWindowTitle("Codex Session")
+        choice_box.setText(f"Analysis {analysis.analysis_id} was created with iteration {iteration.iteration_id}.")
+        choice_box.setInformativeText("Would you like to start a Codex CLI session or copy its start prompt?")
+        start_button = choice_box.addButton("Start Codex CLI", QMessageBox.AcceptRole)
+        copy_button = choice_box.addButton("Copy Start Prompt", QMessageBox.ActionRole)
+        choice_box.addButton("Later", QMessageBox.RejectRole)
+        choice_box.exec()
+        if choice_box.clickedButton() is start_button and self.current_selection.analysis is not None:
             self._launch_session_for_bundle(
                 self.current_selection.project,
                 self.current_selection.analysis,
@@ -1906,6 +2040,18 @@ class CodexHerderApp(QMainWindow):
                 "Main session",
                 make_current=True,
             )
+        elif choice_box.clickedButton() is copy_button:
+            task_text = iteration.task_path.read_text(encoding="utf-8", errors="replace") if iteration.task_path.exists() else ""
+            prompt = build_bootstrap_message(
+                project,
+                analysis,
+                iteration,
+                task_text,
+                session_id=analysis.current_session or f"{project.project_id}_{analysis_id}_main",
+                conda_env="codex_herder",
+            )
+            QApplication.clipboard().setText(prompt)
+            QMessageBox.information(self, "Codex Start Prompt", "The complete Codex CLI start prompt was copied to the clipboard.")
         self.content_tabs.setCurrentWidget(self.cli_tab)
         self._refresh_cli_status_panel()
 
