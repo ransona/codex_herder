@@ -20,6 +20,8 @@ It does not require a database. The GUI is a thin layer over a repo layout that 
 - Copy a complete startup prompt for a ChatGPT GUI Codex thread
 - Keep optional CLI session support for existing projects
 - View figures directly from `output/figures`
+- Organize figures through `Scratch`, `Draft`, and `Final` stages
+- Create numbered Scratch figure slots and promote or demote figures between stages
 - Browse processed data, stats outputs, and code files
 - Edit notes in the GUI and inspect iteration files
 - Ask Codex to create new iterations instead of having the GUI create them directly
@@ -47,6 +49,9 @@ workspace/
               code/
               output/
                 figures/
+                  Scratch/
+                  Draft/
+                  Final/
                 processed_data/
                 stats/
               logs/
@@ -68,8 +73,9 @@ Raw data should stay outside iteration folders. Iterations are for code, derived
    ```text
    output/
      figures/
-       response_curve.png
-       response_curve.md
+       Final/
+         response_curve.png
+         response_curve.md
      videos/
        activity_movie.mp4
        activity_movie.md
@@ -80,6 +86,8 @@ Raw data should stay outside iteration folders. Iterations are for code, derived
    ```
 
    The figure and video descriptions begin with a brief summary and then provide detailed reproduction information. Update them whenever the associated output changes.
+
+   New figures can be added from the Figures tab with `New Scratch Figure`. Scratch slots receive names such as `001_response_curve.md`, `002_population_average.md`, and are sorted by their number. After the figure is generated, use `Promote` to move it to `Draft` and then `Final`; use `Demote` to move it back. The Markdown sidecar moves with the figure.
 9. Use the `Processed Data` tab to create, inspect, rename, delete, copy, and paste named processed-data sets between iterations. Paste operations show transfer progress and keep the current tab selected.
 10. Use `Overview` → `Validate Iteration` before treating an iteration as complete. Validation checks the required layout and reports missing processed-data, figure, or video descriptions.
 

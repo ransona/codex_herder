@@ -1256,8 +1256,14 @@ class CodexHerderApp(QMainWindow):
             figure_list_splitter.setStretchFactor(0, 2)
             figure_list_splitter.setStretchFactor(1, 1)
             button_row = QHBoxLayout()
+            new_scratch_button = QPushButton("New Scratch Figure")
+            promote_button = QPushButton("Promote")
+            demote_button = QPushButton("Demote")
             rename_button = QPushButton("Rename")
             delete_button = QPushButton("Delete")
+            button_row.addWidget(new_scratch_button)
+            button_row.addWidget(promote_button)
+            button_row.addWidget(demote_button)
             button_row.addWidget(rename_button)
             button_row.addWidget(delete_button)
             left_layout.addWidget(figure_list_splitter, 1)
@@ -1326,9 +1332,74 @@ class CodexHerderApp(QMainWindow):
                     preview.zoom_in()
 
             def _refresh_button_state() -> None:
-                enabled = _current_selected_path() is not None
+                target = _current_selected_path()
+                enabled = target is not None
                 rename_button.setEnabled(enabled)
                 delete_button.setEnabled(enabled)
+                category = target.relative_to(assets_dir).parts[0] if target is not None and assets_dir in target.parents else ""
+                promote_button.setEnabled(enabled and category in {"Scratch", "Draft"})
+                demote_button.setEnabled(enabled and category in {"Draft", "Final"})
+
+            def _new_scratch_figure() -> None:
+                title, ok = QInputDialog.getText(self, "New Scratch Figure", "Figure name:")
+                if not ok or not title.strip():
+                    return
+                slug = "_".join(title.strip().split()).replace("/", "_").replace("\\", "_")
+                scratch_dir = assets_dir / "Scratch"
+                scratch_dir.mkdir(parents=True, exist_ok=True)
+                used_numbers = []
+                for path in scratch_dir.rglob("*.md"):
+                    try:
+                        used_numbers.append(int(path.stem.split("_", 1)[0]))
+                    except (ValueError, IndexError):
+                        continue
+                number = max(used_numbers, default=0) + 1
+                target = scratch_dir / f"{number:03d}_{slug}.md"
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S %z")
+                target.write_text(
+                    f"# {target.stem}\n\n"
+                    "## Summary\n"
+                    "Describe what this figure will show.\n\n"
+                    "## Technical description\n"
+                    "Record the source data, processing steps, code, parameters, units, and output details.\n\n"
+                    "## Generated\n"
+                    f"Date and time: {timestamp}\n\n"
+                    "## Change history\n\n"
+                    f"- {timestamp}: Scratch figure requested.\n",
+                    encoding="utf-8",
+                )
+                page._pending_select_rel = str(target.relative_to(assets_dir))  # type: ignore[attr-defined]
+                _refresh()
+
+            def _move_figure_stage(direction: int) -> None:
+                target = _current_selected_path()
+                if target is None or assets_dir not in target.parents:
+                    return
+                relative = target.relative_to(assets_dir)
+                if not relative.parts:
+                    return
+                category = relative.parts[0]
+                stages = ["Scratch", "Draft", "Final"]
+                if category not in stages:
+                    return
+                destination_index = stages.index(category) + direction
+                if not 0 <= destination_index < len(stages):
+                    return
+                destination_dir = assets_dir / stages[destination_index] / relative.parent.relative_to(category)
+                destination_dir.mkdir(parents=True, exist_ok=True)
+                stem = target.stem
+                siblings = [path for path in target.parent.iterdir() if path.is_file() and path.stem == stem]
+                if target not in siblings:
+                    siblings.append(target)
+                for source in siblings:
+                    destination = destination_dir / source.name
+                    if destination.exists():
+                        QMessageBox.warning(self, "Move Figure", f"{destination.name} already exists in {stages[destination_index]}.")
+                        return
+                for source in siblings:
+                    source.rename(destination_dir / source.name)
+                page._pending_select_rel = str((destination_dir / target.name).relative_to(assets_dir))  # type: ignore[attr-defined]
+                _refresh()
 
             def _rename_selected() -> None:
                 target = _current_selected_path()
@@ -1376,7 +1447,19 @@ class CodexHerderApp(QMainWindow):
                     path
                     for path in list_tree_files(assets_dir)
                     if path.suffix.lower() in (IMAGE_EXTENSIONS | SVG_EXTENSIONS)
+                    or (path.suffix.lower() == ".md" and path.with_suffix(path.suffix).exists())
                 ]
+                media_stems = {
+                    path.with_suffix("")
+                    for path in new_files
+                    if path.suffix.lower() in (IMAGE_EXTENSIONS | SVG_EXTENSIONS)
+                }
+                new_files = [
+                    path for path in new_files
+                    if path.suffix.lower() != ".md" or path.with_suffix("") not in media_stems
+                ]
+                stage_order = {"Scratch": 0, "Draft": 1, "Final": 2}
+                new_files.sort(key=lambda path: (stage_order.get(path.relative_to(assets_dir).parts[0], 99), str(path.relative_to(assets_dir)).lower()))
                 new_keys = [str(path.relative_to(assets_dir)) for path in new_files]
                 old_keys = [str(path.relative_to(assets_dir)) for path in files]
                 if new_keys == old_keys:
@@ -1452,6 +1535,9 @@ class CodexHerderApp(QMainWindow):
             listing.itemDoubleClicked.connect(_on_item_double_clicked)
             rename_button.clicked.connect(_rename_selected)
             delete_button.clicked.connect(_delete_selected)
+            new_scratch_button.clicked.connect(_new_scratch_figure)
+            promote_button.clicked.connect(lambda: _move_figure_stage(1))
+            demote_button.clicked.connect(lambda: _move_figure_stage(-1))
             page._refresh_callback = _refresh  # type: ignore[attr-defined]
             _refresh()
             return page
