@@ -918,8 +918,6 @@ class CodexHerderApp(QMainWindow):
             return
         self.current_selection = selection
         self._render_selection()
-        if selection.analysis is not None:
-            self._ensure_associated_session_for_selection()
         self._refresh_cli_status_panel()
 
     def _project_item_selected(self, item: QListWidgetItem) -> None:
