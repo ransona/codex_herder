@@ -17,12 +17,11 @@ It does not require a database. The GUI is a thin layer over a repo layout that 
 - Link one analysis to multiple Codex sessions
 - Reuse an existing session or launch a new one
 - Launch new sessions with a bootstrap message that describes the repo layout and Lab Data Access expectations
-- Resume the selected session inside a dedicated `CLI` tab
-- Choose between an ANSI-rendered terminal view and a raw stream view for Codex output
-- Inspect Codex launch diagnostics and the exact command used to start the CLI
+- Copy a complete startup prompt for a ChatGPT GUI Codex thread
+- Keep optional CLI session support for existing projects
 - View figures directly from `output/figures`
 - Browse processed data, stats outputs, and code files
-- Edit notes and YAML metadata in dynamic right-hand inspector tabs
+- Edit notes in the GUI and inspect iteration files
 - Ask Codex to create new iterations instead of having the GUI create them directly
 - Delete analyses and iterations from the GUI
 
@@ -55,6 +54,37 @@ workspace/
 
 Raw data should stay outside iteration folders. Iterations are for code, derived data, figures, stats outputs, notes, and logs.
 
+## Basic Workflow
+
+1. Create or select a project.
+2. Create an analysis and choose the experiment groups that belong to it.
+3. Create or select an iteration. Each iteration is an isolated working area for one analysis step.
+4. Open the `Codex` tab and copy the generated startup prompt.
+5. In the ChatGPT GUI, start a Codex task on the remote host using the exact `ITERATION FOLDER` shown by Codex Herder, then paste the prompt.
+6. Codex reads the broader filesystem as needed but should write only inside that iteration. At startup it waits for the task instructions rather than making suggestions.
+7. Store reusable intermediate results in specifically named folders under `output/processed_data/`. Each folder must contain its own `description.md` documenting the exact inputs, commands, code version, environment, parameters, transformations, schema, and generation time.
+8. Store figures and videos with same-base-name Markdown sidecars. For example:
+
+   ```text
+   output/
+     figures/
+       response_curve.png
+       response_curve.md
+     videos/
+       activity_movie.mp4
+       activity_movie.md
+     processed_data/
+       average_responses_by_condition/
+         responses.csv
+         description.md
+   ```
+
+   The figure and video descriptions begin with a brief summary and then provide detailed reproduction information. Update them whenever the associated output changes.
+9. Use the `Processed Data` tab to create, inspect, rename, delete, copy, and paste named processed-data sets between iterations. Paste operations show transfer progress and keep the current tab selected.
+10. Use `Overview` → `Validate Iteration` before treating an iteration as complete. Validation checks the required layout and reports missing processed-data, figure, or video descriptions.
+
+By default, analysis code should use only the current iteration's processed data. If data from another iteration, analysis, or project is explicitly needed, record its source in the current dataset's `description.md`.
+
 ## Session Model
 
 Session ids are app-owned stable identifiers, for example:
@@ -63,15 +93,12 @@ Session ids are app-owned stable identifiers, for example:
 - `proj_001_analysis_001_main`
 - `proj_001_analysis_001_alt_01`
 
-When the app launches a new Codex session it:
+When the app launches a new Codex session, or generates a GUI startup prompt, it:
 
 1. Generates the stable session id
 2. Persists it in analysis metadata
-3. Starts the Codex CLI in a PTY-backed terminal tab using:
-
-   `codex --no-alt-screen -C /home/adamranson/code/codex_herder`
-
-4. Sends a bootstrap message that includes a `/rename <session_id>` command and the current project/analysis/iteration context
+3. Uses the selected iteration as the working directory
+4. Includes the current project/analysis/iteration context, experiment groups, output rules, and reproducibility requirements
 
 This avoids depending on informal manual naming.
 
