@@ -1547,12 +1547,21 @@ class CodexHerderApp(QMainWindow):
             left_layout.setContentsMargins(0, 0, 0, 0)
             listing = QTreeWidget()
             listing.setHeaderLabels(["Video"])
+            video_description = QPlainTextEdit()
+            video_description.setReadOnly(True)
+            video_description.setPlaceholderText("Select a video to view its description.")
+            video_description.setMinimumHeight(80)
+            video_list_splitter = QSplitter(Qt.Vertical)
+            video_list_splitter.addWidget(listing)
+            video_list_splitter.addWidget(video_description)
+            video_list_splitter.setStretchFactor(0, 2)
+            video_list_splitter.setStretchFactor(1, 1)
             button_row = QHBoxLayout()
             rename_button = QPushButton("Rename")
             delete_button = QPushButton("Delete")
             button_row.addWidget(rename_button)
             button_row.addWidget(delete_button)
-            left_layout.addWidget(listing, 1)
+            left_layout.addWidget(video_list_splitter, 1)
             left_layout.addLayout(button_row)
 
             preview_panel = QWidget()
@@ -1809,12 +1818,20 @@ class CodexHerderApp(QMainWindow):
                 max_slider.setEnabled(False)
 
             def _show_video_path(path: Path | None) -> None:
+                video_description.clear()
                 if path is None:
                     _clear_video_preview("No video selected")
                     return
                 if path.is_dir():
+                    if (path / "description.md").is_file():
+                        video_description.setPlainText((path / "description.md").read_text(encoding="utf-8", errors="replace"))
                     _clear_video_preview(str(path.relative_to(assets_dir)))
                     return
+                description_path = path.with_suffix(".md")
+                if description_path.is_file():
+                    video_description.setPlainText(description_path.read_text(encoding="utf-8", errors="replace"))
+                else:
+                    video_description.setPlainText("No description file found for this video.")
                 page._video_selected_path = path  # type: ignore[attr-defined]
                 npy_path = _preferred_video_path(path)
                 try:
