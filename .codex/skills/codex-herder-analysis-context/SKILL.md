@@ -51,6 +51,8 @@ If any required iteration directories or files are missing, create them before d
 - Every generated figure must have a sidecar Markdown file with the same base name in the same folder (for example, `response_curve.png` and `response_curve.md`).
 - Each figure sidecar must begin with a brief summary of what is plotted, followed by a detailed reproducibility description covering source data, processing steps, code or commands, parameters, units, environment, code version, and generation date and time.
 - If a figure is changed or regenerated, update its sidecar with a dated explanation of what changed and why.
+- After generating every figure, inspect the rendered figure before considering it complete. Confirm that text, axes, tick labels, legends, units, colors, and line or marker styles are readable; that the layout follows normal plotting conventions; that important content is not clipped or obscured; and that the resolution and aspect ratio are appropriate for the intended use.
+- If the inspection identifies a readability, layout, labeling, or presentation problem, correct the figure and inspect it again before reporting completion.
 - Organize figures hierarchically inside `output/figures/` when related outputs belong together.
 - Use clear subfolder names so the figure folder structure reflects logical groups of related outputs within the iteration.
 - When making multiple iterative small changes to an existing figure, keep the same base figure name and append a version suffix of the form `Vx`, where `x` is the version number.
