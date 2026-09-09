@@ -44,6 +44,10 @@ If any required iteration directories or files are missing, create them before d
 
 - Put code, scripts, notebooks, configs, and helper files in `code/`.
 - Put viewable figures in `output/figures/`.
+- Organize figures into the three stage subfolders `Scratch/`, `Draft/`, and `Final/`.
+- Every new Scratch figure request must receive the next available three-digit number, starting at `001`, followed by a descriptive name (for example, `001_response_curve`).
+- Sort Scratch figures by this numeric prefix and do not reuse a number for a different figure unless explicitly requested.
+- Preserve the Scratch number and descriptive base name when promoting a figure to `Draft/` or `Final/`.
 - Every generated figure must have a sidecar Markdown file with the same base name in the same folder (for example, `response_curve.png` and `response_curve.md`).
 - Each figure sidecar must begin with a brief summary of what is plotted, followed by a detailed reproducibility description covering source data, processing steps, code or commands, parameters, units, environment, code version, and generation date and time.
 - If a figure is changed or regenerated, update its sidecar with a dated explanation of what changed and why.
@@ -111,6 +115,7 @@ Do not invent experiment groups or silently substitute experiments from groups t
 - Do not copy raw data into iteration folders.
 - Raw data stays outside the analysis workspace.
 - Use `Lab Data Access` to determine where raw data lives, how it is formatted, and how to access it correctly.
+- For Suite2p `suite2p/planeN/data.bin` movie data, verify the binary dtype from the file layout and `ops.npy` before memory-mapping. Do not assume float32: lab datasets have been verified with signed 16-bit (`int16`) `data.bin` files. Check that the dtype, file size, image dimensions, and frame count agree with `timeline_frame_times.npy`.
 - Never use raw `FrameEvents.csv` files for stimulus alignment unless the user explicitly asks for that source. Prefer the processed Timeline-time trial onsets and saved microscope frame-time arrays; if those are unavailable, report the limitation rather than substituting raw `FrameEvents.csv` timing.
 - Only write derived or intermediate data into `output/processed_data/`.
 
