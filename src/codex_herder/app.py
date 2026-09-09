@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QScrollArea,
     QSlider,
+    QSpinBox,
     QSplitter,
     QTabWidget,
     QTextEdit,
@@ -1567,7 +1568,7 @@ class CodexHerderApp(QMainWindow):
             preview_panel = QWidget()
             preview_layout = QVBoxLayout(preview_panel)
             preview_layout.setContentsMargins(0, 0, 0, 0)
-            video_label = QLabel("No video selected")
+            video_label = FigurePreviewLabel("No video selected")
             video_label.setAlignment(Qt.AlignCenter)
             video_scroll = QScrollArea()
             video_scroll.setWidgetResizable(True)
@@ -1579,14 +1580,24 @@ class CodexHerderApp(QMainWindow):
             frame_slider = QSlider(Qt.Horizontal)
             fps_label = QLabel("FPS 30")
             fps_slider = QSlider(Qt.Horizontal)
-            fps_slider.setRange(5, 200)
+            fps_slider.setRange(1, 200)
             fps_slider.setValue(30)
+            fps_input = QSpinBox()
+            fps_input.setRange(1, 200)
+            fps_input.setValue(30)
+            fps_input.setSuffix(" FPS")
+            fps_input.setToolTip("Playback speed. Type a value from 1 to 200 FPS.")
+            zoom_button = QPushButton("Zoom In")
+            reset_zoom_button = QPushButton("Reset View")
             controls_row.addWidget(play_button)
             controls_row.addWidget(prev_button)
             controls_row.addWidget(next_button)
             controls_row.addWidget(frame_slider, 1)
             controls_row.addWidget(fps_label)
             controls_row.addWidget(fps_slider)
+            controls_row.addWidget(fps_input)
+            controls_row.addWidget(zoom_button)
+            controls_row.addWidget(reset_zoom_button)
             min_label = QLabel("Min 2%")
             min_slider = QSlider(Qt.Horizontal)
             min_slider.setRange(0, 1000)
@@ -1697,8 +1708,8 @@ class CodexHerderApp(QMainWindow):
                 return array, "channels_last", fps
 
             def _apply_video_playback_rate() -> None:
-                effective_fps = float(fps_slider.value())
-                tick_ms = 33
+                effective_fps = float(fps_input.value())
+                tick_ms = max(1, int(round(1000.0 / effective_fps))) if effective_fps <= 30 else 33
                 page._video_timer.setInterval(tick_ms)  # type: ignore[attr-defined]
                 frames_per_tick = max(1, int(round(effective_fps * (tick_ms / 1000.0))))
                 page._video_frame_step = frames_per_tick  # type: ignore[attr-defined]
@@ -1755,10 +1766,8 @@ class CodexHerderApp(QMainWindow):
                     target = preview_panel.size()
                 if target.width() < 16 or target.height() < 16:
                     target = QSize(pixmap.width(), pixmap.height())
-                scaled = pixmap.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                video_label.setPixmap(scaled)
-                video_label.setMinimumSize(scaled.size())
-                video_label.setText("")
+                video_label.setMinimumSize(target)
+                video_label.set_source_pixmap(pixmap)
 
             def _set_video_frame(index: int) -> None:
                 frame_count = int(getattr(page, "_video_frames", 0))
@@ -1804,7 +1813,7 @@ class CodexHerderApp(QMainWindow):
                 page._video_source_fps = 10.0  # type: ignore[attr-defined]
                 page._video_frame_step = 1  # type: ignore[attr-defined]
                 video_label.setText(message)
-                video_label.setPixmap(QPixmap())
+                video_label.clear_source_pixmap(message)
                 video_label.setMinimumSize(QSize(0, 0))
                 frame_slider.setRange(0, 0)
                 frame_slider.setValue(0)
@@ -2063,7 +2072,12 @@ class CodexHerderApp(QMainWindow):
             prev_button.clicked.connect(lambda: _set_video_frame(int(getattr(page, "_video_frame_index", 0)) - 1))
             next_button.clicked.connect(lambda: _set_video_frame(int(getattr(page, "_video_frame_index", 0)) + 1))
             frame_slider.valueChanged.connect(_set_video_frame)
-            fps_slider.valueChanged.connect(lambda value: (fps_label.setText(f"FPS {value}"), _apply_video_playback_rate()))
+            fps_slider.valueChanged.connect(fps_input.setValue)
+            fps_input.valueChanged.connect(
+                lambda value: (fps_slider.setValue(value), fps_label.setText(f"FPS {value}"), _apply_video_playback_rate())
+            )
+            zoom_button.clicked.connect(video_label.zoom_in)
+            reset_zoom_button.clicked.connect(video_label.reset_view)
             min_slider.valueChanged.connect(_update_minmax_labels)
             video_scroll.viewport().installEventFilter(self)
             page._video_render_callback = _render_video_frame  # type: ignore[attr-defined]
