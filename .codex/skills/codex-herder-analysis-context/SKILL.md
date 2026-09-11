@@ -79,6 +79,10 @@ If any required iteration directories or files are missing, create them before d
 - If any file in a specific processed-data subfolder is changed, update that same subfolder's `description.md` with the date and time and a clear explanation of what changed and why.
 - Keep a dated change history in each subfolder's `description.md`; do not silently overwrite the processing description.
 - Put statistical outputs, summaries, reports, and result tables in `output/stats/`.
+- Statistical-analysis output must include all appropriate summary statistics needed to understand the data and results, not only p-values.
+- Each statistical test must have a description explaining exactly how it was run, including the model or test, the variables and groups compared, the unit of analysis, sample sizes, pairing or repeated-measures structure, contrasts, covariates, exclusions, transformations, effect sizes, uncertainty intervals, multiple-comparison corrections, and software or code version.
+- Before applying a statistical test, assess its suitability and perform relevant assumption checks, such as independence, distributional assumptions, variance or covariance structure, linearity, sphericity, and influential observations as appropriate to the test.
+- Report the assumption and suitability checks with the statistical output, and highlight any failed assumptions, limitations, deviations from the planned test, or interpretation concerns by default.
 - Put run logs and execution history in `logs/`.
 - Update `notes.md` as work progresses.
 - Keep metadata aligned with the filesystem layout.
