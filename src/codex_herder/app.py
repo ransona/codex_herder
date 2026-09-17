@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import shutil
+import sqlite3
 import tempfile
 import time
 from dataclasses import dataclass
@@ -542,6 +543,7 @@ class ExperimentGroupDialog(QDialog):
         self.user_combo = QComboBox()
         self.user_combo.addItems(user_ids or [""])
         self.add_button = QPushButton("Add")
+        self.add_picker_button = QPushButton("Add from Picker")
         self.entries_list = QListWidget()
         self.entries_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.remove_button = QPushButton("Remove Selected")
@@ -553,7 +555,10 @@ class ExperimentGroupDialog(QDialog):
         layout.addWidget(self.exp_ids_edit)
         layout.addWidget(QLabel("userID"))
         layout.addWidget(self.user_combo)
-        layout.addWidget(self.add_button)
+        add_controls = QHBoxLayout()
+        add_controls.addWidget(self.add_button)
+        add_controls.addWidget(self.add_picker_button)
+        layout.addLayout(add_controls)
         layout.addWidget(QLabel("Current group entries"))
         layout.addWidget(self.entries_list, 1)
         entry_controls = QHBoxLayout()
@@ -567,6 +572,7 @@ class ExperimentGroupDialog(QDialog):
         layout.addLayout(save_controls)
         self._entries: list[ExperimentRef] = list(group.experiments) if group is not None else []
         self.add_button.clicked.connect(self._add_entries)
+        self.add_picker_button.clicked.connect(self._add_from_picker)
         self.remove_button.clicked.connect(self._remove_selected)
         self.move_up_button.clicked.connect(lambda: self._move_selected(-1))
         self.move_down_button.clicked.connect(lambda: self._move_selected(1))
@@ -588,6 +594,36 @@ class ExperimentGroupDialog(QDialog):
                 self._entries.append(entry)
         self.exp_ids_edit.clear()
         self._refresh_entries()
+
+    def _add_from_picker(self) -> None:
+        try:
+            picker_groups = load_picker_groups()
+        except (OSError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Picker", f"Could not read the Lab Pipeline picker:\n{exc}")
+            return
+        if not picker_groups:
+            QMessageBox.information(
+                self,
+                "Picker",
+                f"No experiment groups were found in the Lab Pipeline picker.\n\n{picker_db_path()}",
+            )
+            return
+        dialog = PickerGroupSelectionDialog(picker_groups, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        existing = {(entry.exp_id, entry.user_id) for entry in self._entries}
+        added = 0
+        for picker_group in dialog.selected_groups():
+            for entry in picker_group.experiments:
+                key = (entry.exp_id, entry.user_id)
+                if key in existing:
+                    continue
+                self._entries.append(entry)
+                existing.add(key)
+                added += 1
+        self._refresh_entries()
+        if added == 0:
+            QMessageBox.information(self, "Picker", "All experiments from the selected picker groups are already in this group.")
 
     def _remove_selected(self) -> None:
         rows = sorted((self.entries_list.row(item) for item in self.entries_list.selectedItems()), reverse=True)
@@ -654,6 +690,83 @@ class ExperimentGroupSelectionDialog(QDialog):
 
     def selected_group_names(self) -> list[str]:
         return [item.text() for item in self.listing.selectedItems()]
+
+
+def picker_db_path() -> Path:
+    configured = os.environ.get("CODEX_HERDER_PICKER_DB", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".config" / "lab_pipeline" / "experiment_picker.sqlite"
+
+
+def load_picker_groups(db_path: Path | None = None) -> list[ExperimentGroup]:
+    """Load Lab Pipeline picker groups and their descendant experiments."""
+    path = db_path or picker_db_path()
+    if not path.exists():
+        return []
+    with sqlite3.connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT id, parent_id, node_type, name, user_id, exp_id, sort_order "
+            "FROM nodes ORDER BY parent_id, sort_order, id"
+        ).fetchall()
+
+    nodes = {int(row["id"]): row for row in rows}
+    children: dict[int | None, list[sqlite3.Row]] = {}
+    for row in rows:
+        children.setdefault(row["parent_id"], []).append(row)
+
+    def group_path(row: sqlite3.Row) -> str:
+        names = [str(row["name"])]
+        parent_id = row["parent_id"]
+        while parent_id is not None and parent_id in nodes:
+            parent = nodes[parent_id]
+            names.append(str(parent["name"]))
+            parent_id = parent["parent_id"]
+        return " / ".join(reversed(names))
+
+    def descendant_experiments(group_id: int) -> list[ExperimentRef]:
+        entries: list[ExperimentRef] = []
+        for child in children.get(group_id, []):
+            if child["node_type"] == "experiment" and child["exp_id"]:
+                entries.append(ExperimentRef(str(child["exp_id"]), child["user_id"] or None))
+            elif child["node_type"] == "group":
+                entries.extend(descendant_experiments(int(child["id"])))
+        return entries
+
+    groups = []
+    for row in rows:
+        if row["node_type"] != "group" or row["parent_id"] is None:
+            continue
+        group = ExperimentGroup(group_path(row), descendant_experiments(int(row["id"])))
+        if group.experiments:
+            groups.append(group)
+    return groups
+
+
+class PickerGroupSelectionDialog(QDialog):
+    def __init__(self, groups: list[ExperimentGroup], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add from Lab Pipeline Picker")
+        self.resize(640, 480)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Select one or more picker groups to add to this Codex Herder group:"))
+        self.listing = QListWidget()
+        self.listing.setSelectionMode(QListWidget.MultiSelection)
+        self._groups = groups
+        for group in groups:
+            self.listing.addItem(f"{group.name} ({len(group.experiments)} experiments)")
+        layout.addWidget(self.listing, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel_button = QPushButton("Cancel")
+        add_button = QPushButton("Add Selected")
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(add_button)
+        layout.addLayout(buttons)
+        cancel_button.clicked.connect(self.reject)
+        add_button.clicked.connect(self.accept)
+
+    def selected_groups(self) -> list[ExperimentGroup]:
+        return [self._groups[row.row()] for row in self.listing.selectedItems()]
 
 
 class CodexHerderApp(QMainWindow):
