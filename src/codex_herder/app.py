@@ -154,6 +154,7 @@ class FigurePreviewLabel(QLabel):
         self._pan = QPoint(0, 0)
         self._drag_start: QPoint | None = None
         self._last_escape_at = 0.0
+        self._pixel_exact = False
         self.setFocusPolicy(Qt.StrongFocus)
 
     def set_open_callback(self, callback: callable) -> None:
@@ -168,6 +169,12 @@ class FigurePreviewLabel(QLabel):
     def set_source_pixmap(self, pixmap: QPixmap) -> None:
         self._source_pixmap = pixmap
         self.setText("")
+        self._update_pixel_size()
+        self.update()
+
+    def set_pixel_exact(self, enabled: bool) -> None:
+        self._pixel_exact = enabled
+        self._update_pixel_size()
         self.update()
 
     def zoom_in(self) -> None:
@@ -190,24 +197,33 @@ class FigurePreviewLabel(QLabel):
             int(point.x() - new_center.x() - relative_x * new_scaled.width()),
             int(point.y() - new_center.y() - relative_y * new_scaled.height()),
         )
+        self._update_pixel_size()
         self.update()
 
     def _scaled_geometry(self, zoom: float) -> tuple[QSize, QPoint]:
         base_size = self._source_pixmap.size()
-        base_size.scale(max(1, self.width() - 20), max(1, self.height() - 20), Qt.KeepAspectRatio)
+        if not self._pixel_exact:
+            base_size.scale(max(1, self.width() - 20), max(1, self.height() - 20), Qt.KeepAspectRatio)
         scaled_size = QSize(max(1, int(base_size.width() * zoom)), max(1, int(base_size.height() * zoom)))
         center = QPoint((self.width() - scaled_size.width()) // 2, (self.height() - scaled_size.height()) // 2)
         return scaled_size, center
 
+    def _update_pixel_size(self) -> None:
+        if self._pixel_exact and not self._source_pixmap.isNull():
+            size, _ = self._scaled_geometry(self._zoom)
+            self.resize(size)
+
     def reset_view(self) -> None:
         self._zoom = 1.0
         self._pan = QPoint(0, 0)
+        self._update_pixel_size()
         self.update()
 
     def clear_source_pixmap(self, text: str = "") -> None:
         self._source_pixmap = QPixmap()
         self._zoom = 1.0
         self._pan = QPoint(0, 0)
+        self._update_pixel_size()
         self.setPixmap(QPixmap())
         self.setText(text)
         self.update()
@@ -223,7 +239,8 @@ class FigurePreviewLabel(QLabel):
         painter = QPainter(self)
         painter.fillRect(self.rect(), self.palette().base())
         target_size, centered_position = self._scaled_geometry(self._zoom)
-        scaled = self._source_pixmap.scaled(target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        transformation = Qt.FastTransformation if self._pixel_exact else Qt.SmoothTransformation
+        scaled = self._source_pixmap.scaled(target_size, Qt.KeepAspectRatio, transformation)
         position = centered_position + self._pan
         painter.drawPixmap(position, scaled)
 
@@ -1684,8 +1701,11 @@ class CodexHerderApp(QMainWindow):
             video_label = FigurePreviewLabel("No video selected")
             video_label.setAlignment(Qt.AlignCenter)
             video_scroll = QScrollArea()
-            video_scroll.setWidgetResizable(True)
+            # Keep the video label at the source pixel dimensions. The scroll
+            # area provides navigation when the movie is larger than the pane.
+            video_scroll.setWidgetResizable(False)
             video_scroll.setWidget(video_label)
+            video_label.set_pixel_exact(True)
             controls_row = QHBoxLayout()
             play_button = QPushButton("Play")
             prev_button = QPushButton("Prev")
@@ -1874,12 +1894,6 @@ class CodexHerderApp(QMainWindow):
                         rgb_uint8 = (rgb * 255.0).astype(np.uint8)
                         image = QImage(rgb_uint8.data, rgb_uint8.shape[1], rgb_uint8.shape[0], rgb_uint8.strides[0], QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(image.copy())
-                target = video_scroll.viewport().size()
-                if target.width() < 16 or target.height() < 16:
-                    target = preview_panel.size()
-                if target.width() < 16 or target.height() < 16:
-                    target = QSize(pixmap.width(), pixmap.height())
-                video_label.setMinimumSize(target)
                 video_label.set_source_pixmap(pixmap)
 
             def _set_video_frame(index: int) -> None:
