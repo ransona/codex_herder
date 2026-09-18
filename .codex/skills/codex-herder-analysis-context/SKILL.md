@@ -53,20 +53,20 @@ If any required iteration directories or files are missing, create them before d
 - If a figure is changed or regenerated, update its sidecar with a dated explanation of what changed and why.
 - After generating every figure, inspect the rendered figure before considering it complete. Confirm that text, axes, tick labels, legends, units, colors, and line or marker styles are readable; that the layout follows normal plotting conventions; that important content is not clipped or obscured; and that the resolution and aspect ratio are appropriate for the intended use.
 - If the inspection identifies a readability, layout, labeling, or presentation problem, correct the figure and inspect it again before reporting completion.
+- When a single generation step produces fewer than 10 figures, display every generated figure inline in the chat response unless the user requests otherwise.
 - Organize figures hierarchically inside `output/figures/` when related outputs belong together.
 - Use clear subfolder names so the figure folder structure reflects logical groups of related outputs within the iteration.
 - When making multiple iterative small changes to an existing figure, keep the same base figure name and append a version suffix of the form `Vx`, where `x` is the version number.
 - Before creating a new versioned figure file, ask the user whether they want a new version.
 - If the user does not want a new version, assume the latest version should be overwritten rather than creating an additional file.
 - Put viewable videos in `output/videos/`.
-- Every generated video or video dataset must have a sidecar Markdown file with the same base name in the same folder (for example, `activity_movie.mp4` and `activity_movie.md`).
+- Every generated video must be saved as an `.mp4` file and must have a sidecar Markdown file with the same base name in the same folder (for example, `activity_movie.mp4` and `activity_movie.md`).
 - Each video sidecar must begin with a brief summary of the content, followed by a detailed reproducibility description covering source data, processing steps, code or commands, parameters, units, frame rate, dimensions, environment, code version, and generation date and time.
 - If a video or video dataset is changed or regenerated, update its sidecar with a dated explanation of what changed and why.
 - Organize videos hierarchically inside `output/videos/` using the same grouping conventions as figures when related outputs belong together.
 - Use clear subfolder names so the video folder structure reflects logical groups of related outputs within the iteration.
-- Save videos as both a `.npy` file and a matching `.mp4` file with the same base name.
-- Treat the `.npy` file as the primary GUI preview representation and the `.mp4` file as the portable playback/export version.
-- Store array-based video representations such as montage movies, aligned movie stacks intended for direct playback, or GUI-preview movie tensors in `output/videos/`, not `output/processed_data/`.
+- Do not generate a companion `.npy` file for a video unless it is specifically requested for a separate analysis purpose.
+- If an array-based video representation is specifically requested, store it in `output/processed_data/` unless it is also being used as a directly viewable video asset, and document its shape and purpose in its description file.
 - When making multiple iterative small changes to an existing video, keep the same base video name and append a version suffix of the form `Vx`, where `x` is the version number.
 - Before creating a new versioned video file, ask the user whether they want a new version.
 - If the user does not want a new version, assume the latest version should be overwritten rather than creating an additional file.
