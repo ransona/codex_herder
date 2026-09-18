@@ -5,9 +5,10 @@ import sys
 import time
 from pathlib import Path
 
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QApplication
 
-from codex_herder.app import CodexHerderApp
+from codex_herder.app import CodexHerderApp, fit_size_preserving_aspect
 from codex_herder.storage import create_analysis, create_iteration, create_project
 from codex_herder.terminal import TerminalPane
 
@@ -17,6 +18,11 @@ def _app() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+def test_video_fit_preserves_aspect_ratio() -> None:
+    assert fit_size_preserving_aspect(QSize(1600, 900), QSize(800, 600)) == QSize(800, 450)
+    assert fit_size_preserving_aspect(QSize(400, 800), QSize(800, 600)) == QSize(300, 600)
 
 
 def test_gui_loads_sample_workspace(monkeypatch) -> None:

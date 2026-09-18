@@ -144,6 +144,17 @@ def _expanded_tree_paths(tree: QTreeWidget, item_targets: dict[int, Path], root:
     return expanded
 
 
+def fit_size_preserving_aspect(source_size: QSize, available_size: QSize) -> QSize:
+    """Fit a source rectangle using one uniform scale factor and center it."""
+    fitted = QSize(source_size)
+    fitted.scale(
+        max(1, available_size.width()),
+        max(1, available_size.height()),
+        Qt.KeepAspectRatio,
+    )
+    return fitted
+
+
 class FigurePreviewLabel(QLabel):
     def __init__(self, empty_text: str) -> None:
         super().__init__(empty_text)
@@ -198,8 +209,10 @@ class FigurePreviewLabel(QLabel):
         self.update()
 
     def _scaled_geometry(self, zoom: float) -> tuple[QSize, QPoint]:
-        base_size = self._source_pixmap.size()
-        base_size.scale(max(1, self.width() - 20), max(1, self.height() - 20), Qt.KeepAspectRatio)
+        base_size = fit_size_preserving_aspect(
+            self._source_pixmap.size(),
+            QSize(max(1, self.width()), max(1, self.height())),
+        )
         scaled_size = QSize(max(1, int(base_size.width() * zoom)), max(1, int(base_size.height() * zoom)))
         center = QPoint((self.width() - scaled_size.width()) // 2, (self.height() - scaled_size.height()) // 2)
         return scaled_size, center
