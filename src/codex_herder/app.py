@@ -16,7 +16,7 @@ try:
 except Exception:  # pragma: no cover
     cv2 = None  # type: ignore[assignment]
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer
+from PySide6.QtCore import QPoint, QSize, Qt, QThread, QTimer, QObject, Signal, Slot
 from PySide6.QtGui import QAction, QPainter, QPixmap, QDesktopServices, QImage
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -153,6 +153,53 @@ def fit_size_preserving_aspect(source_size: QSize, available_size: QSize) -> QSi
         Qt.KeepAspectRatio,
     )
     return fitted
+
+
+class BackgroundLoadWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, loader) -> None:
+        super().__init__()
+        self._loader = loader
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self._loader())
+        except Exception as exc:  # pragma: no cover - exercised through GUI failures
+            self.failed.emit(str(exc))
+
+
+class BackgroundLoadReceiver(QObject):
+    def __init__(self, on_success, on_failure, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._on_success = on_success
+        self._on_failure = on_failure
+
+    @Slot(object)
+    def success(self, result) -> None:
+        self._on_success(result)
+
+    @Slot(str)
+    def failure(self, message: str) -> None:
+        self._on_failure(message)
+
+
+def load_figure_image(path: Path) -> QImage:
+    """Load a raster or SVG figure into a thread-safe QImage."""
+    if path.suffix.lower() in SVG_EXTENSIONS:
+        image = QImage(1600, 1200, QImage.Format_ARGB32)
+        image.fill(Qt.white)
+        painter = QPainter(image)
+        renderer = QSvgRenderer(str(path))
+        renderer.render(painter)
+        painter.end()
+    else:
+        image = QImage(str(path))
+    if image.isNull():
+        raise RuntimeError(f"Could not load figure: {path}")
+    return image
 
 
 class FigurePreviewLabel(QLabel):
@@ -1413,10 +1460,51 @@ class CodexHerderApp(QMainWindow):
             files: list[Path] = []
             item_targets: dict[int, Path] = {}
             page._pending_select_rel = None  # type: ignore[attr-defined]
+            page._figure_load_serial = 0  # type: ignore[attr-defined]
+            page._figure_load_thread = None  # type: ignore[attr-defined]
+            loading_progress: QProgressDialog | None = None
+
+            def _show_loading(message: str) -> None:
+                nonlocal loading_progress
+                if loading_progress is not None:
+                    loading_progress.close()
+                    loading_progress.deleteLater()
+                loading_progress = QProgressDialog(message, None, 0, 0, self)
+                loading_progress.setWindowTitle("Codex Herder")
+                loading_progress.setWindowModality(Qt.NonModal)
+                loading_progress.setAutoClose(False)
+                loading_progress.setAutoReset(False)
+                loading_progress.setMinimumDuration(0)
+                loading_progress.show()
+
+            def _hide_loading() -> None:
+                nonlocal loading_progress
+                if loading_progress is not None:
+                    loading_progress.close()
+                    loading_progress.deleteLater()
+                    loading_progress = None
+
+            def _run_background_load(loader, on_success, on_failure) -> None:
+                thread = QThread(page)
+                worker = BackgroundLoadWorker(loader)
+                receiver = BackgroundLoadReceiver(on_success, on_failure, page)
+                worker.moveToThread(thread)
+                thread.started.connect(worker.run)
+                worker.finished.connect(receiver.success)
+                worker.failed.connect(receiver.failure)
+                worker.finished.connect(thread.quit)
+                worker.failed.connect(thread.quit)
+                thread.finished.connect(worker.deleteLater)
+                thread.finished.connect(thread.deleteLater)
+                page._figure_load_thread = thread  # type: ignore[attr-defined]
+                thread.start()
 
             def _show_path(path: Path | None) -> None:
+                page._figure_load_serial += 1  # type: ignore[attr-defined]
+                load_serial = page._figure_load_serial  # type: ignore[attr-defined]
                 figure_description.clear()
                 if path is None or path.is_dir():
+                    _hide_loading()
                     if path is not None and path.is_dir() and (path / "description.md").is_file():
                         figure_description.setPlainText((path / "description.md").read_text(encoding="utf-8", errors="replace"))
                     preview.set_figure_path(None)
@@ -1429,20 +1517,38 @@ class CodexHerderApp(QMainWindow):
                     figure_description.setPlainText("No description file found for this figure.")
                 preview.set_figure_path(path)
                 if path.suffix.lower() in IMAGE_EXTENSIONS:
-                    pixmap = QPixmap(str(path))
-                    if pixmap.isNull():
-                        preview.clear_source_pixmap(str(path.relative_to(assets_dir)))
-                        return
-                    preview.set_source_pixmap(pixmap)
+                    _show_loading("Loading figure...")
+
+                    def _figure_loaded(image: QImage) -> None:
+                        if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
+                            return
+                        _hide_loading()
+                        preview.set_source_pixmap(QPixmap.fromImage(image))
+
+                    def _figure_failed(message: str) -> None:
+                        if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
+                            return
+                        _hide_loading()
+                        preview.clear_source_pixmap(f"Unable to load figure.\n\n{message}")
+
+                    _run_background_load(lambda: load_figure_image(path), _figure_loaded, _figure_failed)
                     return
                 if path.suffix.lower() in SVG_EXTENSIONS:
-                    pixmap = QPixmap(900, 720)
-                    pixmap.fill(Qt.white)
-                    painter = QPainter(pixmap)
-                    renderer = QSvgRenderer(str(path))
-                    renderer.render(painter)
-                    painter.end()
-                    preview.set_source_pixmap(pixmap)
+                    _show_loading("Loading figure...")
+
+                    def _svg_loaded(image: QImage) -> None:
+                        if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
+                            return
+                        _hide_loading()
+                        preview.set_source_pixmap(QPixmap.fromImage(image))
+
+                    def _svg_failed(message: str) -> None:
+                        if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
+                            return
+                        _hide_loading()
+                        preview.clear_source_pixmap(f"Unable to load figure.\n\n{message}")
+
+                    _run_background_load(lambda: load_figure_image(path), _svg_loaded, _svg_failed)
                     return
                 preview.clear_source_pixmap(str(path.relative_to(assets_dir)))
 
@@ -1765,6 +1871,44 @@ class CodexHerderApp(QMainWindow):
             page._video_selected_path = None  # type: ignore[attr-defined]
             page._video_source_fps = 10.0  # type: ignore[attr-defined]
             page._video_frame_step = 1  # type: ignore[attr-defined]
+            page._video_load_serial = 0  # type: ignore[attr-defined]
+            page._video_load_thread = None  # type: ignore[attr-defined]
+            loading_progress: QProgressDialog | None = None
+
+            def _show_loading(message: str) -> None:
+                nonlocal loading_progress
+                if loading_progress is not None:
+                    loading_progress.close()
+                    loading_progress.deleteLater()
+                loading_progress = QProgressDialog(message, None, 0, 0, self)
+                loading_progress.setWindowTitle("Codex Herder")
+                loading_progress.setWindowModality(Qt.NonModal)
+                loading_progress.setAutoClose(False)
+                loading_progress.setAutoReset(False)
+                loading_progress.setMinimumDuration(0)
+                loading_progress.show()
+
+            def _hide_loading() -> None:
+                nonlocal loading_progress
+                if loading_progress is not None:
+                    loading_progress.close()
+                    loading_progress.deleteLater()
+                    loading_progress = None
+
+            def _run_background_load(loader, on_success, on_failure) -> None:
+                thread = QThread(page)
+                worker = BackgroundLoadWorker(loader)
+                receiver = BackgroundLoadReceiver(on_success, on_failure, page)
+                worker.moveToThread(thread)
+                thread.started.connect(worker.run)
+                worker.finished.connect(receiver.success)
+                worker.failed.connect(receiver.failure)
+                worker.finished.connect(thread.quit)
+                worker.failed.connect(thread.quit)
+                thread.finished.connect(worker.deleteLater)
+                thread.finished.connect(thread.deleteLater)
+                page._video_load_thread = thread  # type: ignore[attr-defined]
+                thread.start()
 
             def _video_pair_paths(target: Path) -> list[Path]:
                 if target.is_dir():
@@ -1940,6 +2084,7 @@ class CodexHerderApp(QMainWindow):
                     play_button.setText("Pause")
 
             def _clear_video_preview(message: str) -> None:
+                _hide_loading()
                 _stop_video_playback()
                 page._video_array = None  # type: ignore[attr-defined]
                 page._video_frames = 0  # type: ignore[attr-defined]
@@ -1962,6 +2107,8 @@ class CodexHerderApp(QMainWindow):
                 max_slider.setEnabled(False)
 
             def _show_video_path(path: Path | None) -> None:
+                page._video_load_serial += 1  # type: ignore[attr-defined]
+                load_serial = page._video_load_serial  # type: ignore[attr-defined]
                 video_description.clear()
                 if path is None:
                     _clear_video_preview("No video selected")
@@ -1978,45 +2125,57 @@ class CodexHerderApp(QMainWindow):
                     video_description.setPlainText("No description file found for this video.")
                 page._video_selected_path = path  # type: ignore[attr-defined]
                 npy_path = _preferred_video_path(path)
-                try:
+                _stop_video_playback()
+                _show_loading("Loading video...")
+
+                def _load_selected_video():
                     if npy_path.suffix.lower() == ".npy" and npy_path.exists():
                         array, _mode, fps = _load_video_array(npy_path)
                     elif path.suffix.lower() == ".mp4":
                         array, _mode, fps = _load_video_from_mp4(path)
-                        np.save(path.with_suffix(".npy"), array)
-                        npy_path = path.with_suffix(".npy")
                     else:
                         raise RuntimeError(
-                            "No companion .npy file found for GUI preview, and this file is not a supported mp4 fallback."
+                            "Only MP4 videos or explicitly provided NPY video arrays can be previewed."
                         )
                     data_min, data_max, p2, p98 = _sample_percentiles(array)
-                except Exception as exc:
-                    _clear_video_preview(f"Unable to load video array.\n\n{npy_path}\n\n{exc}")
-                    return
-                page._video_array = array  # type: ignore[attr-defined]
-                page._video_frames = int(array.shape[0])  # type: ignore[attr-defined]
-                page._video_data_min = data_min  # type: ignore[attr-defined]
-                page._video_data_max = data_max  # type: ignore[attr-defined]
-                page._video_frame_index = 0  # type: ignore[attr-defined]
-                page._video_source_fps = fps  # type: ignore[attr-defined]
-                frame_slider.setRange(0, max(0, int(array.shape[0]) - 1))
-                min_slider.setEnabled(True)
-                max_slider.setEnabled(True)
-                play_button.setEnabled(True)
-                prev_button.setEnabled(True)
-                next_button.setEnabled(True)
-                fps_slider.setEnabled(True)
-                min_slider.blockSignals(True)
-                max_slider.blockSignals(True)
-                min_slider.setValue(_slider_from_value(p2, data_min, data_max))
-                max_slider.setValue(_slider_from_value(p98, data_min, data_max))
-                min_slider.blockSignals(False)
-                max_slider.blockSignals(False)
-                min_label.setText(f"Min {p2:.3g}")
-                max_label.setText(f"Max {p98:.3g}")
-                _apply_video_playback_rate()
-                _set_video_frame(0)
-                QTimer.singleShot(0, _render_video_frame)
+                    return array, fps, data_min, data_max, p2, p98
+
+                def _video_loaded(result) -> None:
+                    if load_serial != page._video_load_serial:  # type: ignore[attr-defined]
+                        return
+                    _hide_loading()
+                    array, fps, data_min, data_max, p2, p98 = result
+                    page._video_array = array  # type: ignore[attr-defined]
+                    page._video_frames = int(array.shape[0])  # type: ignore[attr-defined]
+                    page._video_data_min = data_min  # type: ignore[attr-defined]
+                    page._video_data_max = data_max  # type: ignore[attr-defined]
+                    page._video_frame_index = 0  # type: ignore[attr-defined]
+                    page._video_source_fps = fps  # type: ignore[attr-defined]
+                    frame_slider.setRange(0, max(0, int(array.shape[0]) - 1))
+                    min_slider.setEnabled(True)
+                    max_slider.setEnabled(True)
+                    play_button.setEnabled(True)
+                    prev_button.setEnabled(True)
+                    next_button.setEnabled(True)
+                    fps_slider.setEnabled(True)
+                    min_slider.blockSignals(True)
+                    max_slider.blockSignals(True)
+                    min_slider.setValue(_slider_from_value(p2, data_min, data_max))
+                    max_slider.setValue(_slider_from_value(p98, data_min, data_max))
+                    min_slider.blockSignals(False)
+                    max_slider.blockSignals(False)
+                    min_label.setText(f"Min {p2:.3g}")
+                    max_label.setText(f"Max {p98:.3g}")
+                    _apply_video_playback_rate()
+                    _set_video_frame(0)
+                    QTimer.singleShot(0, _render_video_frame)
+
+                def _video_failed(message: str) -> None:
+                    if load_serial != page._video_load_serial:  # type: ignore[attr-defined]
+                        return
+                    _clear_video_preview(f"Unable to load video.\n\n{path}\n\n{message}")
+
+                _run_background_load(_load_selected_video, _video_loaded, _video_failed)
 
             def _current_selected_path() -> Path | None:
                 item = listing.currentItem()
