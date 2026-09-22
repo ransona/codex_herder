@@ -5,10 +5,12 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QSize
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QApplication, QTreeWidget
 
-from codex_herder.app import CodexHerderApp, fit_size_preserving_aspect
+from codex_herder.app import CodexHerderApp, FigurePreviewLabel, fit_size_preserving_aspect
 from codex_herder.storage import create_analysis, create_iteration, create_project
 from codex_herder.terminal import TerminalPane
 
@@ -43,6 +45,62 @@ def test_gui_loads_sample_workspace(monkeypatch) -> None:
         labels = [window.content_tabs.tabText(i) for i in range(window.content_tabs.count())]
         assert "Overview" in labels
         assert "Notes" in labels
+    finally:
+        window.close()
+
+
+def test_figure_preview_loads_after_selecting_a_figure(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv("CODEX_HERDER_WORKSPACE_ROOT", str(workspace))
+    project = create_project("project_figures", "Figures", workspace_root_path=workspace)
+    analysis = create_analysis(project, "analysis_figures", "Figures")
+    iteration = create_iteration(project, analysis, "iter_001")
+    image_path = iteration.path / "output" / "figures" / "test.png"
+    image = QImage(32, 24, QImage.Format_RGB32)
+    image.fill(0x336699)
+    assert image.save(str(image_path))
+
+    _app()
+    window = CodexHerderApp()
+    page = window._iteration_files_tab(iteration, "figures")
+    listing = page.findChild(QTreeWidget)
+    preview = page.findChild(FigurePreviewLabel)
+    assert listing is not None
+    assert preview is not None
+    try:
+        listing.setCurrentItem(listing.topLevelItem(0))
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and preview._source_pixmap.isNull():
+            QApplication.processEvents()
+            time.sleep(0.01)
+        assert not preview._source_pixmap.isNull()
+    finally:
+        window.close()
+
+
+def test_video_preview_loads_after_selecting_a_video(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv("CODEX_HERDER_WORKSPACE_ROOT", str(workspace))
+    project = create_project("project_videos", "Videos", workspace_root_path=workspace)
+    analysis = create_analysis(project, "analysis_videos", "Videos")
+    iteration = create_iteration(project, analysis, "iter_001")
+    video_path = iteration.path / "output" / "videos" / "test.npy"
+    np.save(video_path, np.zeros((3, 16, 24), dtype=np.uint8))
+
+    _app()
+    window = CodexHerderApp()
+    page = window._iteration_files_tab(iteration, "videos")
+    listing = page.findChild(QTreeWidget)
+    assert listing is not None
+    try:
+        listing.setCurrentItem(listing.topLevelItem(0))
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and getattr(page, "_video_array", None) is None:
+            QApplication.processEvents()
+            time.sleep(0.01)
+        assert getattr(page, "_video_array", None) is not None
     finally:
         window.close()
 

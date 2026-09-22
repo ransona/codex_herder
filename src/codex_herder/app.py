@@ -1470,6 +1470,7 @@ class CodexHerderApp(QMainWindow):
             page._pending_select_rel = None  # type: ignore[attr-defined]
             page._figure_load_serial = 0  # type: ignore[attr-defined]
             page._figure_load_thread = None  # type: ignore[attr-defined]
+            page._figure_load_jobs = []  # type: ignore[attr-defined]
             page._figure_loaded_path = None  # type: ignore[attr-defined]
             page._figure_loading_path = None  # type: ignore[attr-defined]
             loading_progress: QProgressDialog | None = None
@@ -1505,6 +1506,13 @@ class CodexHerderApp(QMainWindow):
                 receiver.done.connect(thread.quit)
                 thread.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
+                job = (thread, worker, receiver)
+                page._figure_load_jobs.append(job)  # type: ignore[attr-defined]
+                thread.finished.connect(
+                    lambda job=job: page._figure_load_jobs.remove(job)  # type: ignore[attr-defined]
+                    if job in page._figure_load_jobs  # type: ignore[attr-defined]
+                    else None
+                )
                 page._figure_load_thread = thread  # type: ignore[attr-defined]
                 thread.start()
 
@@ -1901,6 +1909,7 @@ class CodexHerderApp(QMainWindow):
             page._video_frame_step = 1  # type: ignore[attr-defined]
             page._video_load_serial = 0  # type: ignore[attr-defined]
             page._video_load_thread = None  # type: ignore[attr-defined]
+            page._video_load_jobs = []  # type: ignore[attr-defined]
             page._video_loading_path = None  # type: ignore[attr-defined]
             loading_progress: QProgressDialog | None = None
 
@@ -1935,6 +1944,13 @@ class CodexHerderApp(QMainWindow):
                 receiver.done.connect(thread.quit)
                 thread.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
+                job = (thread, worker, receiver)
+                page._video_load_jobs.append(job)  # type: ignore[attr-defined]
+                thread.finished.connect(
+                    lambda job=job: page._video_load_jobs.remove(job)  # type: ignore[attr-defined]
+                    if job in page._video_load_jobs  # type: ignore[attr-defined]
+                    else None
+                )
                 page._video_load_thread = thread  # type: ignore[attr-defined]
                 thread.start()
 
