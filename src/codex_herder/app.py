@@ -1473,6 +1473,8 @@ class CodexHerderApp(QMainWindow):
             page._figure_load_jobs = []  # type: ignore[attr-defined]
             page._figure_loaded_path = None  # type: ignore[attr-defined]
             page._figure_loading_path = None  # type: ignore[attr-defined]
+            page._figure_load_watchdog = QTimer(page)  # type: ignore[attr-defined]
+            page._figure_load_watchdog.setSingleShot(True)  # type: ignore[attr-defined]
             loading_progress: QProgressDialog | None = None
 
             def _show_loading(message: str) -> None:
@@ -1495,14 +1497,24 @@ class CodexHerderApp(QMainWindow):
                     loading_progress.deleteLater()
                     loading_progress = None
 
+            def _figure_load_timed_out() -> None:
+                if getattr(page, "_figure_loading_path", None) is None:
+                    return
+                page._figure_load_serial += 1  # type: ignore[attr-defined]
+                page._figure_loading_path = None  # type: ignore[attr-defined]
+                _hide_loading()
+                preview.clear_source_pixmap("Figure loading timed out. Select the figure to retry.")
+
+            page._figure_load_watchdog.timeout.connect(_figure_load_timed_out)  # type: ignore[attr-defined]
+
             def _run_background_load(loader, on_success, on_failure) -> None:
                 thread = QThread(page)
                 worker = BackgroundLoadWorker(loader)
                 receiver = BackgroundLoadReceiver(on_success, on_failure, page)
                 worker.moveToThread(thread)
                 thread.started.connect(worker.run)
-                worker.finished.connect(receiver.success)
-                worker.failed.connect(receiver.failure)
+                worker.finished.connect(receiver.success, Qt.QueuedConnection)
+                worker.failed.connect(receiver.failure, Qt.QueuedConnection)
                 receiver.done.connect(thread.quit)
                 thread.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
@@ -1528,6 +1540,7 @@ class CodexHerderApp(QMainWindow):
                     return
                 page._figure_load_serial += 1  # type: ignore[attr-defined]
                 load_serial = page._figure_load_serial  # type: ignore[attr-defined]
+                page._figure_load_watchdog.stop()  # type: ignore[attr-defined]
                 page._figure_loading_path = None  # type: ignore[attr-defined]
                 page._figure_loaded_path = None  # type: ignore[attr-defined]
                 figure_description.clear()
@@ -1547,11 +1560,13 @@ class CodexHerderApp(QMainWindow):
                 if path.suffix.lower() in IMAGE_EXTENSIONS:
                     page._figure_loading_path = path  # type: ignore[attr-defined]
                     _show_loading("Loading figure...")
+                    page._figure_load_watchdog.start(30000)  # type: ignore[attr-defined]
 
                     def _figure_loaded(image: QImage) -> None:
                         if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
                             return
                         _hide_loading()
+                        page._figure_load_watchdog.stop()  # type: ignore[attr-defined]
                         page._figure_loading_path = None  # type: ignore[attr-defined]
                         page._figure_loaded_path = path  # type: ignore[attr-defined]
                         preview.set_source_pixmap(QPixmap.fromImage(image))
@@ -1560,6 +1575,7 @@ class CodexHerderApp(QMainWindow):
                         if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
                             return
                         _hide_loading()
+                        page._figure_load_watchdog.stop()  # type: ignore[attr-defined]
                         page._figure_loading_path = None  # type: ignore[attr-defined]
                         preview.clear_source_pixmap(f"Unable to load figure.\n\n{message}")
 
@@ -1568,11 +1584,13 @@ class CodexHerderApp(QMainWindow):
                 if path.suffix.lower() in SVG_EXTENSIONS:
                     page._figure_loading_path = path  # type: ignore[attr-defined]
                     _show_loading("Loading figure...")
+                    page._figure_load_watchdog.start(30000)  # type: ignore[attr-defined]
 
                     def _svg_loaded(image: QImage) -> None:
                         if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
                             return
                         _hide_loading()
+                        page._figure_load_watchdog.stop()  # type: ignore[attr-defined]
                         page._figure_loading_path = None  # type: ignore[attr-defined]
                         page._figure_loaded_path = path  # type: ignore[attr-defined]
                         preview.set_source_pixmap(QPixmap.fromImage(image))
@@ -1581,6 +1599,7 @@ class CodexHerderApp(QMainWindow):
                         if load_serial != page._figure_load_serial:  # type: ignore[attr-defined]
                             return
                         _hide_loading()
+                        page._figure_load_watchdog.stop()  # type: ignore[attr-defined]
                         page._figure_loading_path = None  # type: ignore[attr-defined]
                         preview.clear_source_pixmap(f"Unable to load figure.\n\n{message}")
 
@@ -1911,6 +1930,8 @@ class CodexHerderApp(QMainWindow):
             page._video_load_thread = None  # type: ignore[attr-defined]
             page._video_load_jobs = []  # type: ignore[attr-defined]
             page._video_loading_path = None  # type: ignore[attr-defined]
+            page._video_load_watchdog = QTimer(page)  # type: ignore[attr-defined]
+            page._video_load_watchdog.setSingleShot(True)  # type: ignore[attr-defined]
             loading_progress: QProgressDialog | None = None
 
             def _show_loading(message: str) -> None:
@@ -1933,14 +1954,24 @@ class CodexHerderApp(QMainWindow):
                     loading_progress.deleteLater()
                     loading_progress = None
 
+            def _video_load_timed_out() -> None:
+                if getattr(page, "_video_loading_path", None) is None:
+                    return
+                page._video_load_serial += 1  # type: ignore[attr-defined]
+                page._video_loading_path = None  # type: ignore[attr-defined]
+                _hide_loading()
+                _clear_video_preview("Video loading timed out. Select the video to retry.")
+
+            page._video_load_watchdog.timeout.connect(_video_load_timed_out)  # type: ignore[attr-defined]
+
             def _run_background_load(loader, on_success, on_failure) -> None:
                 thread = QThread(page)
                 worker = BackgroundLoadWorker(loader)
                 receiver = BackgroundLoadReceiver(on_success, on_failure, page)
                 worker.moveToThread(thread)
                 thread.started.connect(worker.run)
-                worker.finished.connect(receiver.success)
-                worker.failed.connect(receiver.failure)
+                worker.finished.connect(receiver.success, Qt.QueuedConnection)
+                worker.failed.connect(receiver.failure, Qt.QueuedConnection)
                 receiver.done.connect(thread.quit)
                 thread.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
@@ -2162,6 +2193,7 @@ class CodexHerderApp(QMainWindow):
                     return
                 page._video_load_serial += 1  # type: ignore[attr-defined]
                 load_serial = page._video_load_serial  # type: ignore[attr-defined]
+                page._video_load_watchdog.stop()  # type: ignore[attr-defined]
                 video_description.clear()
                 if path is None:
                     _clear_video_preview("No video selected")
@@ -2181,6 +2213,7 @@ class CodexHerderApp(QMainWindow):
                 npy_path = _preferred_video_path(path)
                 _stop_video_playback()
                 _show_loading("Loading video...")
+                page._video_load_watchdog.start(30000)  # type: ignore[attr-defined]
 
                 def _load_selected_video():
                     if npy_path.suffix.lower() == ".npy" and npy_path.exists():
@@ -2198,7 +2231,9 @@ class CodexHerderApp(QMainWindow):
                     if load_serial != page._video_load_serial:  # type: ignore[attr-defined]
                         return
                     _hide_loading()
+                    page._video_load_watchdog.stop()  # type: ignore[attr-defined]
                     page._video_loading_path = None  # type: ignore[attr-defined]
+                    page._video_load_watchdog.stop()  # type: ignore[attr-defined]
                     array, fps, data_min, data_max, p2, p98 = result
                     page._video_array = array  # type: ignore[attr-defined]
                     page._video_frames = int(array.shape[0])  # type: ignore[attr-defined]
