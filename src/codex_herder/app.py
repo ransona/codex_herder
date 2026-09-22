@@ -172,6 +172,8 @@ class BackgroundLoadWorker(QObject):
 
 
 class BackgroundLoadReceiver(QObject):
+    done = Signal()
+
     def __init__(self, on_success, on_failure, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._on_success = on_success
@@ -179,11 +181,17 @@ class BackgroundLoadReceiver(QObject):
 
     @Slot(object)
     def success(self, result) -> None:
-        self._on_success(result)
+        try:
+            self._on_success(result)
+        finally:
+            self.done.emit()
 
     @Slot(str)
     def failure(self, message: str) -> None:
-        self._on_failure(message)
+        try:
+            self._on_failure(message)
+        finally:
+            self.done.emit()
 
 
 def load_figure_image(path: Path) -> QImage:
@@ -1494,8 +1502,7 @@ class CodexHerderApp(QMainWindow):
                 thread.started.connect(worker.run)
                 worker.finished.connect(receiver.success)
                 worker.failed.connect(receiver.failure)
-                worker.finished.connect(thread.quit)
-                worker.failed.connect(thread.quit)
+                receiver.done.connect(thread.quit)
                 thread.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
                 page._figure_load_thread = thread  # type: ignore[attr-defined]
@@ -1925,8 +1932,7 @@ class CodexHerderApp(QMainWindow):
                 thread.started.connect(worker.run)
                 worker.finished.connect(receiver.success)
                 worker.failed.connect(receiver.failure)
-                worker.finished.connect(thread.quit)
-                worker.failed.connect(thread.quit)
+                receiver.done.connect(thread.quit)
                 thread.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
                 page._video_load_thread = thread  # type: ignore[attr-defined]
