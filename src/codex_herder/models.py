@@ -44,6 +44,19 @@ class ExperimentGroup:
     experiments: list[ExperimentRef] = field(default_factory=list)
 
 
+def experiment_group_path(name: str) -> str:
+    """Return a picker hierarchy using the canonical ``A / B`` form."""
+    parts = [part.strip() for part in name.split("/") if part.strip()]
+    if parts and parts[0].casefold() == "experiments":
+        parts.pop(0)
+    return " / ".join(parts)
+
+
+def experiment_reference_path(group_name: str, experiment: ExperimentRef) -> str:
+    path = experiment_group_path(group_name)
+    return f"{path} / {experiment.exp_id}" if path else experiment.exp_id
+
+
 @dataclass(slots=True)
 class Iteration:
     iteration_id: str

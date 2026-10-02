@@ -57,7 +57,16 @@ except Exception:  # pragma: no cover
     QVideoWidget = None  # type: ignore[assignment]
     QT_VIDEO_AVAILABLE = False
 
-from .models import Analysis, ExperimentGroup, ExperimentRef, Iteration, Project, SessionLink
+from .models import (
+    Analysis,
+    ExperimentGroup,
+    ExperimentRef,
+    Iteration,
+    Project,
+    SessionLink,
+    experiment_group_path,
+    experiment_reference_path,
+)
 from .sessions import (
     build_bootstrap_message,
     build_new_session_spec,
@@ -796,7 +805,7 @@ def load_picker_groups(db_path: Path | None = None) -> list[ExperimentGroup]:
             parent = nodes[parent_id]
             names.append(str(parent["name"]))
             parent_id = parent["parent_id"]
-        return " / ".join(reversed(names))
+        return experiment_group_path(" / ".join(reversed(names)))
 
     def descendant_experiments(group_id: int) -> list[ExperimentRef]:
         entries: list[ExperimentRef] = []
@@ -882,9 +891,7 @@ class PickerAnalysisGroupDialog(QDialog):
         self.tree.clear()
         group_items: dict[tuple[str, ...], QTreeWidgetItem] = {}
         for group in groups:
-            parts = tuple(part for part in group.name.split(" / ") if part)
-            if parts and parts[0] == "Experiments":
-                parts = parts[1:]
+            parts = tuple(part for part in experiment_group_path(group.name).split(" / ") if part)
             if not parts:
                 continue
             parent_item: QTreeWidgetItem | None = None
@@ -905,7 +912,9 @@ class PickerAnalysisGroupDialog(QDialog):
             parent_item.setFlags(parent_item.flags() | Qt.ItemIsUserCheckable)
             parent_item.setCheckState(0, Qt.Checked if group.name in selected else Qt.Unchecked)
             for entry in group.experiments:
-                label = f"{entry.exp_id} ({entry.user_id})" if entry.user_id else entry.exp_id
+                label = experiment_reference_path(group.name, entry)
+                if entry.user_id:
+                    label += f" ({entry.user_id})"
                 parent_item.addChild(QTreeWidgetItem([label, ""]))
             parent_item.setExpanded(False)
         self.tree.expandToDepth(0)
@@ -1398,7 +1407,10 @@ class CodexHerderApp(QMainWindow):
         if selection.analysis:
             lines.append(f"Current session: {selection.analysis.current_session or 'none'}")
             lines.append(f"Linked sessions: {len(selection.analysis.linked_codex_sessions)}")
-            lines.append(f"Included experiment groups: {', '.join(selection.analysis.included_experiment_groups) or 'none'}")
+            lines.append(
+                "Included experiment groups: "
+                f"{', '.join(experiment_group_path(name) for name in selection.analysis.included_experiment_groups) or 'none'}"
+            )
             lines.append(f"App tmux sessions: {len(tmux_list_sessions())}")
             current = self._current_session_link()
             if current is not None:

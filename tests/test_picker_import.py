@@ -2,6 +2,7 @@ from pathlib import Path
 import sqlite3
 
 from codex_herder.app import load_picker_groups
+from codex_herder.models import ExperimentRef, experiment_reference_path
 
 
 def test_load_picker_groups_flattens_nested_groups_in_picker_order(tmp_path: Path) -> None:
@@ -29,10 +30,16 @@ def test_load_picker_groups_flattens_nested_groups_in_picker_order(tmp_path: Pat
     groups = load_picker_groups(database)
 
     assert [group.name for group in groups] == [
-        "Experiments / Visual",
-        "Experiments / Visual / Nested",
+        "Visual",
+        "Visual / Nested",
     ]
     assert [(item.exp_id, item.user_id) for item in groups[0].experiments] == [
         ("exp-002", "user-b"),
         ("exp-001", "user-a"),
     ]
+
+
+def test_experiment_reference_path_preserves_group_hierarchy() -> None:
+    assert experiment_reference_path("Experiments / A / B", ExperimentRef("2026-01-01_01_MOUSE")) == (
+        "A / B / 2026-01-01_01_MOUSE"
+    )

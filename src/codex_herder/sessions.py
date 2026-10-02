@@ -13,7 +13,15 @@ import json
 import sqlite3
 from pathlib import Path
 
-from .models import Analysis, ExperimentGroup, Iteration, Project, SessionLink
+from .models import (
+    Analysis,
+    ExperimentGroup,
+    Iteration,
+    Project,
+    SessionLink,
+    experiment_group_path,
+    experiment_reference_path,
+)
 from .storage import APP_ROOT, bootstrap_log_path, session_log_path
 from .tmux_manager import tmux_socket_path
 
@@ -98,11 +106,16 @@ def build_bootstrap_message(
     if included_groups:
         group_lines = []
         for group in included_groups:
-            entries = ", ".join(
-                f"{exp.exp_id} ({exp.user_id})" if exp.user_id else exp.exp_id
-                for exp in group.experiments
-            ) or "no experiments added yet"
-            group_lines.append(f"- {group.name}: {entries}")
+            group_name = experiment_group_path(group.name)
+            group_lines.append(f"- {group_name}")
+            if group.experiments:
+                group_lines.extend(
+                    f"  - {experiment_reference_path(group.name, exp)}"
+                    + (f" ({exp.user_id})" if exp.user_id else "")
+                    for exp in group.experiments
+                )
+            else:
+                group_lines.append("  - no experiments added yet")
         group_block = "\n".join(group_lines)
     else:
         group_block = "- none selected"

@@ -96,6 +96,8 @@ If any required iteration directories or files are missing, create them before d
 
 Experiment groups originate in the Lab Pipeline Queue Manager picker. Codex Herder saves selected picker groups with each analysis so experiment membership is preserved for reproducibility.
 
+Preserve the picker folder hierarchy whenever referring to experiment groups or individual experiments. Use ` / ` (a space, slash, space) between hierarchy levels. For example, refer to a subgroup as `A / B` and one of its experiments as `A / B / 2026-01-01_01_MOUSE`. Do not flatten hierarchy levels into an unrelated name, and do not include the picker’s top-level `Experiments` container in these references.
+
 Expected metadata model:
 
 - each selected picker group contains one or more experiment references
