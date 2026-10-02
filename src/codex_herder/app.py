@@ -917,7 +917,6 @@ class PickerAnalysisGroupDialog(QDialog):
                     label += f" ({entry.user_id})"
                 parent_item.addChild(QTreeWidgetItem([label, ""]))
             parent_item.setExpanded(False)
-        self.tree.expandToDepth(0)
 
     def _refresh_picker(self) -> None:
         selected = {group.name for group in self.selected_groups()}

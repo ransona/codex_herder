@@ -10,7 +10,13 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QTreeWidget
 
-from codex_herder.app import CodexHerderApp, FigurePreviewLabel, fit_size_preserving_aspect
+from codex_herder.app import (
+    CodexHerderApp,
+    FigurePreviewLabel,
+    PickerAnalysisGroupDialog,
+    fit_size_preserving_aspect,
+)
+from codex_herder.models import ExperimentGroup, ExperimentRef
 from codex_herder.storage import create_analysis, create_iteration, create_project
 from codex_herder.terminal import TerminalPane
 
@@ -25,6 +31,25 @@ def _app() -> QApplication:
 def test_video_fit_preserves_aspect_ratio() -> None:
     assert fit_size_preserving_aspect(QSize(1600, 900), QSize(800, 600)) == QSize(800, 450)
     assert fit_size_preserving_aspect(QSize(400, 800), QSize(800, 600)) == QSize(300, 600)
+
+
+def test_picker_groups_start_collapsed(monkeypatch) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    _app()
+    dialog = PickerAnalysisGroupDialog(
+        [
+            ExperimentGroup("Group A", [ExperimentRef("exp_a")]),
+            ExperimentGroup("Group A / Subgroup B", [ExperimentRef("exp_b")]),
+        ]
+    )
+    try:
+        assert dialog.tree.topLevelItemCount() == 1
+        assert all(
+            not dialog.tree.topLevelItem(index).isExpanded()
+            for index in range(dialog.tree.topLevelItemCount())
+        )
+    finally:
+        dialog.close()
 
 
 def test_gui_loads_sample_workspace(monkeypatch) -> None:
