@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QTreeWidget
 
@@ -48,6 +48,20 @@ def test_picker_groups_start_collapsed(monkeypatch) -> None:
             not dialog.tree.topLevelItem(index).isExpanded()
             for index in range(dialog.tree.topLevelItemCount())
         )
+    finally:
+        dialog.close()
+
+
+def test_picker_parent_selection_preserves_descendant_groups(monkeypatch) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    _app()
+    dialog = PickerAnalysisGroupDialog(
+        [ExperimentGroup("Group A / Subgroup B", [ExperimentRef("exp_b")])]
+    )
+    try:
+        parent = dialog.tree.topLevelItem(0)
+        parent.setCheckState(0, Qt.Checked)
+        assert [group.name for group in dialog.selected_groups()] == ["Group A / Subgroup B"]
     finally:
         dialog.close()
 

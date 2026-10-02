@@ -898,6 +898,9 @@ class PickerAnalysisGroupDialog(QDialog):
                 item = group_items.get(key)
                 if item is None:
                     item = QTreeWidgetItem([part, ""])
+                    item.setData(0, Qt.UserRole, " / ".join(key))
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(0, Qt.Unchecked)
                     if parent_item is None:
                         self.tree.addTopLevelItem(item)
                     else:
@@ -907,7 +910,6 @@ class PickerAnalysisGroupDialog(QDialog):
             assert parent_item is not None
             parent_item.setData(0, Qt.UserRole, group.name)
             parent_item.setText(1, f"{len(group.experiments)} experiments")
-            parent_item.setFlags(parent_item.flags() | Qt.ItemIsUserCheckable)
             parent_item.setCheckState(0, Qt.Checked if group.name in selected else Qt.Unchecked)
             for entry in group.experiments:
                 label = experiment_reference_path(group.name, entry)
@@ -926,20 +928,21 @@ class PickerAnalysisGroupDialog(QDialog):
         self._populate(groups, selected)
 
     def selected_groups(self) -> list[ExperimentGroup]:
-        selected: list[ExperimentGroup] = []
+        selected_names: set[str] = set()
 
-        def visit(item: QTreeWidgetItem) -> None:
+        def visit(item: QTreeWidgetItem, parent_selected: bool = False) -> None:
             group_path = item.data(0, Qt.UserRole)
-            if group_path and item.checkState(0) == Qt.Checked:
+            is_selected = parent_selected or item.checkState(0) == Qt.Checked
+            if group_path and is_selected:
                 group = self._groups_by_path.get(str(group_path))
                 if group is not None:
-                    selected.append(group)
+                    selected_names.add(group.name)
             for index in range(item.childCount()):
-                visit(item.child(index))
+                visit(item.child(index), is_selected)
 
         for index in range(self.tree.topLevelItemCount()):
             visit(self.tree.topLevelItem(index))
-        return selected
+        return [group for group in self._groups_by_path.values() if group.name in selected_names]
 
 
 class CodexHerderApp(QMainWindow):
