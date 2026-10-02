@@ -14,6 +14,7 @@ It does not require a database. The GUI is a thin layer over a repo layout that 
 ## Features
 
 - Browse `Project -> Analysis -> Iteration` in a left hierarchy pane
+- Choose analysis experiment groups directly from the Lab Pipeline Queue Manager picker
 - Link one analysis to multiple Codex sessions
 - Reuse an existing session or launch a new one
 - Launch new sessions with a bootstrap message that describes the repo layout and Lab Data Access expectations
@@ -62,7 +63,7 @@ Raw data should stay outside iteration folders. Iterations are for code, derived
 ## Basic Workflow
 
 1. Create or select a project.
-2. Create an analysis and choose the experiment groups that belong to it.
+2. Create an analysis and choose its experiment groups from the Lab Pipeline Queue Manager picker. Codex Herder saves a snapshot of the selected group memberships in the analysis.
 3. Create or select an iteration. Each iteration is an isolated working area for one analysis step.
 4. Open the `Codex` tab and copy the generated startup prompt.
 5. In the ChatGPT GUI, start a Codex task on the remote host using the exact `ITERATION FOLDER` shown by Codex Herder, then paste the prompt.
@@ -90,6 +91,8 @@ Raw data should stay outside iteration folders. Iterations are for code, derived
    New figures can be added from the Figures tab with `New Scratch Figure`. Scratch slots receive names such as `001_response_curve.md`, `002_population_average.md`, and are sorted by their number. After the figure is generated, use `Promote` to move it to `Draft` and then `Final`; use `Demote` to move it back. The Markdown sidecar moves with the figure.
 9. Use the `Processed Data` tab to create, inspect, rename, delete, copy, and paste named processed-data sets between iterations. Paste operations show transfer progress and keep the current tab selected.
 10. Use `Overview` → `Validate Iteration` before treating an iteration as complete. Validation checks the required layout and reports missing processed-data, figure, or video descriptions.
+
+Use `Edit Experiment Groups` after selecting an analysis or iteration to revise its picker-group selection. `Refresh Picker` reloads the latest groups and experiment IDs from Lab Pipeline before saving the replacement snapshot.
 
 By default, analysis code should use only the current iteration's processed data. If data from another iteration, analysis, or project is explicitly needed, record its source in the current dataset's `description.md`.
 

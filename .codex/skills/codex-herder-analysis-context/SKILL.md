@@ -15,7 +15,7 @@ The workspace is organized as:
 
 Each project contains analyses. Each analysis contains iterations. Treat the current iteration as the main working unit unless explicitly told otherwise.
 
-Projects may also define experiment groups in project metadata. Analyses may include one or more of those experiment groups. An experiment group is a named list of experiment references, where each reference contains:
+Experiment groups are selected from the Lab Pipeline Queue Manager picker when an analysis is created or edited. Codex Herder saves the selected picker groups in the analysis metadata. An experiment group is a named list of experiment references, where each reference contains:
 
 - `expID`
 - optional `userID`
@@ -94,20 +94,19 @@ If any required iteration directories or files are missing, create them before d
 
 ## Experiment groups
 
-Experiment groups are project-level metadata. They are used to declare which experiments belong together for reuse across analyses.
+Experiment groups originate in the Lab Pipeline Queue Manager picker. Codex Herder saves selected picker groups with each analysis so experiment membership is preserved for reproducibility.
 
 Expected metadata model:
 
-- project metadata may contain named experiment groups
-- each group contains one or more experiment references
+- each selected picker group contains one or more experiment references
 - each reference has an `expID` and may also have a `userID`
-- analysis metadata may contain a list of included experiment-group names
+- analysis metadata contains the included picker-group names and a saved group snapshot
 
 When working inside an analysis iteration:
 
 - inspect analysis metadata to determine which experiment groups are included
-- inspect project metadata to resolve those group names into concrete `expID` / `userID` entries
-- treat only the included experiment groups as the default experiment sets for that analysis unless told otherwise
+- inspect the analysis metadata snapshot to resolve those group names into concrete `expID` / `userID` entries
+- treat only the saved included experiment groups as the default experiment sets for that analysis unless told otherwise
 - if the user is already working with a supplied dataset or a clearly specified local analysis input, work with that supplied dataset and do not go searching for experiments on your own
 - `Lab Data Access` may be used freely to explore and inspect data for the explicitly indicated `expID`s
 - do not use experiment groups or `Lab Data Access` to look for additional experiments beyond the explicitly indicated `expID`s unless the user explicitly asks for that
@@ -122,6 +121,7 @@ Do not invent experiment groups or silently substitute experiments from groups t
 - Raw data stays outside the analysis workspace.
 - Use `Lab Data Access` to determine where raw data lives, how it is formatted, and how to access it correctly.
 - For Suite2p `suite2p/planeN/data.bin` movie data, verify the binary dtype from the file layout and `ops.npy` before memory-mapping. Do not assume float32: lab datasets have been verified with signed 16-bit (`int16`) `data.bin` files. Check that the dtype, file size, image dimensions, and frame count agree with `timeline_frame_times.npy`.
+- For second-channel Suite2p movie data, look under `<experiment_root>/ch2/suite2p/planeN/data.bin` rather than the primary `<experiment_root>/suite2p/planeN/data.bin` tree. Load the matching `ops.npy`, `timeline_frame_times.npy`, and other metadata from that same `ch2/suite2p/planeN/` directory, and verify dtype, dimensions, file size, and frame count before memory-mapping.
 - Never use raw `FrameEvents.csv` files for stimulus alignment unless the user explicitly asks for that source. Prefer the processed Timeline-time trial onsets and saved microscope frame-time arrays; if those are unavailable, report the limitation rather than substituting raw `FrameEvents.csv` timing.
 - Only write derived or intermediate data into `output/processed_data/`.
 

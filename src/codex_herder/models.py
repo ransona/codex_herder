@@ -81,6 +81,7 @@ class Analysis:
     current_session: str | None = None
     reused_from_analysis: str | None = None
     included_experiment_groups: list[str] = field(default_factory=list)
+    experiment_groups: list[ExperimentGroup] = field(default_factory=list)
 
     @property
     def metadata_path(self) -> Path:

@@ -30,6 +30,7 @@ from codex_herder.storage import (
     validate_iteration,
     upsert_session_link,
 )
+from codex_herder.models import ExperimentGroup, ExperimentRef
 
 
 def test_create_project_analysis_iteration(tmp_path: Path) -> None:
@@ -112,6 +113,26 @@ def test_create_analysis_without_session_link(tmp_path: Path) -> None:
 
     assert analysis.current_session is None
     assert analysis.linked_codex_sessions == []
+
+
+def test_analysis_persists_picker_group_snapshot(tmp_path: Path) -> None:
+    workspace = tmp_path / "projects"
+    project = create_project("project_picker", "Picker", workspace_root_path=workspace)
+    group = ExperimentGroup("Experiments / Visual", [ExperimentRef("exp-001", "user-a")])
+    create_analysis(
+        project,
+        "analysis_picker",
+        "Picker analysis",
+        included_experiment_groups=[group.name],
+        experiment_groups=[group],
+    )
+
+    loaded = load_analyses(project)[0]
+
+    assert loaded.included_experiment_groups == ["Experiments / Visual"]
+    assert [(entry.exp_id, entry.user_id) for entry in loaded.experiment_groups[0].experiments] == [
+        ("exp-001", "user-a")
+    ]
 
 
 def test_bootstrap_message_includes_required_context(tmp_path: Path) -> None:

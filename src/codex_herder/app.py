@@ -95,6 +95,7 @@ from .storage import (
     read_notes,
     bootstrap_log_path,
     save_iteration,
+    save_analysis,
     save_project,
     set_notes,
     upsert_experiment_group,
@@ -843,6 +844,98 @@ class PickerGroupSelectionDialog(QDialog):
         return [self._groups[row.row()] for row in self.listing.selectedItems()]
 
 
+class PickerAnalysisGroupDialog(QDialog):
+    """Choose Lab Pipeline picker groups for a new analysis."""
+
+    def __init__(
+        self,
+        groups: list[ExperimentGroup],
+        selected: list[str] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Choose Lab Pipeline Experiment Groups")
+        self.resize(720, 560)
+        self._groups_by_path: dict[str, ExperimentGroup] = {}
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Select picker groups for this analysis. Expand a group to inspect its experiments."))
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Lab Pipeline picker group", "Experiments"])
+        self.tree.setSelectionMode(QTreeWidget.NoSelection)
+        self._populate(groups, set(selected or []))
+        layout.addWidget(self.tree, 1)
+        buttons = QHBoxLayout()
+        refresh_button = QPushButton("Refresh Picker")
+        buttons.addWidget(refresh_button)
+        buttons.addStretch(1)
+        cancel_button = QPushButton("Cancel")
+        use_button = QPushButton("Use Selected Groups")
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(use_button)
+        layout.addLayout(buttons)
+        refresh_button.clicked.connect(self._refresh_picker)
+        cancel_button.clicked.connect(self.reject)
+        use_button.clicked.connect(self.accept)
+
+    def _populate(self, groups: list[ExperimentGroup], selected: set[str]) -> None:
+        self._groups_by_path = {group.name: group for group in groups}
+        self.tree.clear()
+        group_items: dict[tuple[str, ...], QTreeWidgetItem] = {}
+        for group in groups:
+            parts = tuple(part for part in group.name.split(" / ") if part)
+            if parts and parts[0] == "Experiments":
+                parts = parts[1:]
+            if not parts:
+                continue
+            parent_item: QTreeWidgetItem | None = None
+            for depth, part in enumerate(parts):
+                key = parts[: depth + 1]
+                item = group_items.get(key)
+                if item is None:
+                    item = QTreeWidgetItem([part, ""])
+                    if parent_item is None:
+                        self.tree.addTopLevelItem(item)
+                    else:
+                        parent_item.addChild(item)
+                    group_items[key] = item
+                parent_item = item
+            assert parent_item is not None
+            parent_item.setData(0, Qt.UserRole, group.name)
+            parent_item.setText(1, f"{len(group.experiments)} experiments")
+            parent_item.setFlags(parent_item.flags() | Qt.ItemIsUserCheckable)
+            parent_item.setCheckState(0, Qt.Checked if group.name in selected else Qt.Unchecked)
+            for entry in group.experiments:
+                label = f"{entry.exp_id} ({entry.user_id})" if entry.user_id else entry.exp_id
+                parent_item.addChild(QTreeWidgetItem([label, ""]))
+            parent_item.setExpanded(False)
+        self.tree.expandToDepth(0)
+
+    def _refresh_picker(self) -> None:
+        selected = {group.name for group in self.selected_groups()}
+        try:
+            groups = load_picker_groups()
+        except (OSError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Picker", f"Could not refresh the Lab Pipeline picker:\n{exc}")
+            return
+        self._populate(groups, selected)
+
+    def selected_groups(self) -> list[ExperimentGroup]:
+        selected: list[ExperimentGroup] = []
+
+        def visit(item: QTreeWidgetItem) -> None:
+            group_path = item.data(0, Qt.UserRole)
+            if group_path and item.checkState(0) == Qt.Checked:
+                group = self._groups_by_path.get(str(group_path))
+                if group is not None:
+                    selected.append(group)
+            for index in range(item.childCount()):
+                visit(item.child(index))
+
+        for index in range(self.tree.topLevelItemCount()):
+            visit(self.tree.topLevelItem(index))
+        return selected
+
+
 class CodexHerderApp(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -912,25 +1005,6 @@ class CodexHerderApp(QMainWindow):
         self.tree.setHeaderLabels(["Analysis / Iteration"])
         left_layout.addWidget(self.tree, 3)
 
-        left_layout.addWidget(QLabel("Experiment Groupings"))
-        self.experiment_group_list = QListWidget()
-        left_layout.addWidget(self.experiment_group_list, 1)
-        exp_group_row = QGridLayout()
-        self.new_exp_group_button = QPushButton("New Exp Group")
-        self.edit_exp_group_button = QPushButton("Edit Exp Group")
-        self.rename_exp_group_button = QPushButton("Rename Exp Group")
-        self.delete_exp_group_button = QPushButton("Delete Exp Group")
-        self.move_exp_group_up_button = QPushButton("↑")
-        self.move_exp_group_down_button = QPushButton("↓")
-        exp_group_row.addWidget(self.new_exp_group_button, 0, 0)
-        exp_group_row.addWidget(self.edit_exp_group_button, 0, 1)
-        exp_group_row.addWidget(self.rename_exp_group_button, 1, 0)
-        exp_group_row.addWidget(self.delete_exp_group_button, 1, 1)
-        exp_group_row.addWidget(self.move_exp_group_up_button, 2, 0)
-        exp_group_row.addWidget(self.move_exp_group_down_button, 2, 1)
-        exp_group_row.setColumnStretch(0, 1)
-        exp_group_row.setColumnStretch(1, 1)
-        left_layout.addLayout(exp_group_row)
         main_splitter.addWidget(left_panel)
 
         center = QWidget()
@@ -946,11 +1020,13 @@ class CodexHerderApp(QMainWindow):
         self.link_button = QPushButton("Link Existing")
         self.copy_session_button = QPushButton("Copy Codex Session")
         self.codex_iteration_button = QPushButton("Ask Codex To Create Iteration")
+        self.edit_analysis_groups_button = QPushButton("Edit Experiment Groups")
         action_row.addWidget(self.launch_button)
         action_row.addWidget(self.resume_button)
         action_row.addWidget(self.link_button)
         action_row.addWidget(self.copy_session_button)
         action_row.addWidget(self.codex_iteration_button)
+        action_row.addWidget(self.edit_analysis_groups_button)
         center_layout.addLayout(action_row)
 
         self.content_tabs = QTabWidget()
@@ -970,17 +1046,10 @@ class CodexHerderApp(QMainWindow):
 
         self.project_list.itemClicked.connect(self._project_item_selected)
         self.tree.itemClicked.connect(self._tree_item_selected)
-        self.experiment_group_list.itemClicked.connect(self._experiment_group_item_selected)
-        self.experiment_group_list.itemDoubleClicked.connect(self._edit_selected_experiment_group)
         self.new_project_button.clicked.connect(self._create_project_dialog)
         self.delete_project_button.clicked.connect(self._delete_selected_project)
         self.new_analysis_button.clicked.connect(self._create_analysis_dialog)
-        self.new_exp_group_button.clicked.connect(self._create_experiment_group_dialog)
-        self.edit_exp_group_button.clicked.connect(self._edit_selected_experiment_group)
-        self.rename_exp_group_button.clicked.connect(self._rename_selected_experiment_group)
-        self.delete_exp_group_button.clicked.connect(self._delete_selected_experiment_group)
-        self.move_exp_group_up_button.clicked.connect(lambda: self._move_selected_experiment_group(-1))
-        self.move_exp_group_down_button.clicked.connect(lambda: self._move_selected_experiment_group(1))
+        self.edit_analysis_groups_button.clicked.connect(self._edit_analysis_experiment_groups)
         self.copy_analysis_button.clicked.connect(self._copy_selected_analysis)
         self.move_up_button.clicked.connect(lambda: self._move_selected_analysis(-1))
         self.move_down_button.clicked.connect(lambda: self._move_selected_analysis(1))
@@ -1039,12 +1108,9 @@ class CodexHerderApp(QMainWindow):
         self._project_lookup.clear()
         self.tree.clear()
         self._tree_lookup.clear()
-        self.experiment_group_list.clear()
-        self._experiment_group_lookup.clear()
         first_project_item: QListWidgetItem | None = None
         selected_project_item: QListWidgetItem | None = None
         selected_item: QTreeWidgetItem | None = None
-        selected_group_item: QListWidgetItem | None = None
         for project in self.projects:
             project_item = QListWidgetItem(project.title)
             self.project_list.addItem(project_item)
@@ -1075,13 +1141,6 @@ class CodexHerderApp(QMainWindow):
                     self._tree_lookup[id(iteration_item)] = iteration_selection
                     if selection_key == self._selection_key(iteration_selection):
                         selected_item = iteration_item
-            for group in current_project.experiment_groups:
-                group_item = QListWidgetItem(group.name)
-                self.experiment_group_list.addItem(group_item)
-                self._experiment_group_lookup[id(group_item)] = group
-                group_selection = Selection(kind="experiment_group", project=current_project, experiment_group=group)
-                if selection_key == self._selection_key(group_selection):
-                    selected_group_item = group_item
         target_item = selected_item
         if target_item is not None:
             self.tree.setCurrentItem(target_item)
@@ -1089,11 +1148,6 @@ class CodexHerderApp(QMainWindow):
             parent = target_item.parent()
             if parent is not None:
                 parent.setExpanded(True)
-            self._render_selection()
-        elif selected_group_item is not None and current_project is not None:
-            self.experiment_group_list.setCurrentItem(selected_group_item)
-            group = self._experiment_group_lookup[id(selected_group_item)]
-            self.current_selection = Selection(kind="experiment_group", project=current_project, experiment_group=group)
             self._render_selection()
         elif current_project is not None:
             self.current_selection = Selection(kind="project", project=current_project)
@@ -1116,34 +1170,12 @@ class CodexHerderApp(QMainWindow):
         self.current_selection = Selection(kind="project", project=project)
         self.reload_workspace()
 
-    def _experiment_group_item_selected(self, item: QListWidgetItem) -> None:
-        group = self._experiment_group_lookup.get(id(item))
-        project = self._selected_project()
-        if group is None or project is None:
-            return
-        self.tree.clearSelection()
-        self.current_selection = Selection(kind="experiment_group", project=project, experiment_group=group)
-        self._render_selection()
-        self._refresh_cli_status_panel()
-
     def _render_selection(self) -> None:
         selection = self.current_selection
         if selection.project is None:
             return
         self.selection_label.setText(self._selection_summary(selection))
-        self._refresh_experiment_group_move_buttons()
         self._rebuild_main_tabs(selection)
-
-    def _refresh_experiment_group_move_buttons(self) -> None:
-        group = self.current_selection.experiment_group
-        project = self.current_selection.project
-        if group is None or project is None:
-            self.move_exp_group_up_button.setEnabled(False)
-            self.move_exp_group_down_button.setEnabled(False)
-            return
-        index = next((index for index, item in enumerate(project.experiment_groups) if item.name == group.name), -1)
-        self.move_exp_group_up_button.setEnabled(index > 0)
-        self.move_exp_group_down_button.setEnabled(0 <= index < len(project.experiment_groups) - 1)
 
     def _selection_summary(self, selection: Selection) -> str:
         if selection.kind == "project" and selection.project:
@@ -2699,14 +2731,26 @@ class CodexHerderApp(QMainWindow):
         label, ok = QInputDialog.getText(self, "New Analysis", "Analysis name:", text="")
         if not ok or not label.strip():
             return
-        included_groups: list[str] = []
-        if project.experiment_groups:
-            group_dialog = ExperimentGroupSelectionDialog(project.experiment_groups, parent=self)
-            if group_dialog.exec() == QDialog.Accepted:
-                included_groups = group_dialog.selected_group_names()
+        try:
+            picker_groups = load_picker_groups()
+        except (OSError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Lab Pipeline Picker", f"Could not read the Lab Pipeline picker:\n{exc}")
+            return
+        group_dialog = PickerAnalysisGroupDialog(picker_groups, parent=self)
+        if group_dialog.exec() != QDialog.Accepted:
+            return
+        analysis_groups = group_dialog.selected_groups()
+        included_groups = [group.name for group in analysis_groups]
         analysis_id = label.strip()
         title = label.strip()
-        analysis = create_analysis(project, analysis_id, title, included_experiment_groups=included_groups, link_session=True)
+        analysis = create_analysis(
+            project,
+            analysis_id,
+            title,
+            included_experiment_groups=included_groups,
+            experiment_groups=analysis_groups,
+            link_session=True,
+        )
         iteration = create_iteration(project, analysis, "iter_001")
         self.selected_project_id = project.project_id
         self.current_selection = Selection(kind="iteration", project=project, analysis=analysis, iteration=iteration)
@@ -2742,6 +2786,27 @@ class CodexHerderApp(QMainWindow):
             QMessageBox.information(self, "Codex Start Prompt", "The complete Codex CLI start prompt was copied to the clipboard.")
         self.content_tabs.setCurrentWidget(self.cli_tab)
         self._refresh_cli_status_panel()
+
+    def _edit_analysis_experiment_groups(self) -> None:
+        bundle = self._selection_bundle_for_analysis()
+        if bundle is None:
+            QMessageBox.information(self, "Edit Experiment Groups", "Select an analysis or iteration first.")
+            return
+        project, analysis, _iteration = bundle
+        try:
+            picker_groups = load_picker_groups()
+        except (OSError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Lab Pipeline Picker", f"Could not read the Lab Pipeline picker:\n{exc}")
+            return
+        selected_names = analysis.included_experiment_groups
+        dialog = PickerAnalysisGroupDialog(picker_groups, selected=selected_names, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        analysis.experiment_groups = dialog.selected_groups()
+        analysis.included_experiment_groups = [group.name for group in analysis.experiment_groups]
+        save_analysis(analysis)
+        self.current_selection = Selection(kind="analysis", project=project, analysis=analysis)
+        self.reload_workspace()
 
     def _create_experiment_group_dialog(self) -> None:
         project = self._selected_project()

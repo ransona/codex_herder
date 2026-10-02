@@ -90,7 +90,11 @@ def build_bootstrap_message(
     iteration_id = iteration.iteration_id if iteration else "none"
     task_body = task_text.strip() or "No task text is available yet."
     project_root = project.path
-    included_groups = [group for group in project.experiment_groups if group.name in analysis.included_experiment_groups]
+    # New analyses save a picker-group snapshot in their own metadata so the
+    # original experiment membership remains stable if the picker is edited.
+    included_groups = analysis.experiment_groups or [
+        group for group in project.experiment_groups if group.name in analysis.included_experiment_groups
+    ]
     if included_groups:
         group_lines = []
         for group in included_groups:
@@ -137,8 +141,6 @@ def build_bootstrap_message(
         "- Keep processed-data references relative to the resolved iteration folder so code can move between analyses and iterations.\n"
         "- Do not use processed data from other iterations, analyses, or projects by default.\n"
         "- Use processed data from elsewhere only when explicitly requested and record its source in the current dataset description.md.\n"
-        "- Save each video as both a .npy file and a matching .mp4 file with the same base name.\n"
-        "- Treat the .npy file as the primary GUI preview representation and the .mp4 file as the portable playback/export version.\n"
         "- Default video output format should be mp4.\n"
         "- On startup, check which experiment groups are included in this analysis.\n"
         "- When asked to perform analysis and the target experiment groups are not specified, ask which included groups to analyze.\n"

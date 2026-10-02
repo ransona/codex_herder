@@ -186,6 +186,7 @@ def load_analyses(project: Project) -> list[Analysis]:
             current_session=payload.get("current_session"),
             reused_from_analysis=payload.get("reused_from_analysis"),
             included_experiment_groups=list(payload.get("included_experiment_groups", [])),
+            experiment_groups=_experiment_groups_from_payload(payload.get("experiment_groups")),
         )
         analysis_by_id[analysis.analysis_id] = analysis
     for analysis_id in project.analysis_ids:
@@ -262,6 +263,7 @@ def save_analysis(analysis: Analysis) -> None:
             "current_session": analysis.current_session,
             "reused_from_analysis": analysis.reused_from_analysis,
             "included_experiment_groups": analysis.included_experiment_groups,
+            "experiment_groups": _experiment_groups_payload(analysis.experiment_groups),
         },
     )
     if not analysis.notes_path.exists():
@@ -316,6 +318,7 @@ def create_analysis(
     analysis_id: str,
     title: str,
     included_experiment_groups: list[str] | None = None,
+    experiment_groups: list[ExperimentGroup] | None = None,
     reuse_session_id: str | None = None,
     reused_from_analysis: str | None = None,
     link_session: bool = True,
@@ -348,6 +351,7 @@ def create_analysis(
         current_session=current_session,
         reused_from_analysis=reused_from_analysis,
         included_experiment_groups=list(included_experiment_groups or []),
+        experiment_groups=list(experiment_groups or []),
     )
     if analysis_id not in project.analysis_ids:
         project.analysis_ids.append(analysis_id)
@@ -526,6 +530,14 @@ def copy_analysis(project: Project, analysis: Analysis, new_analysis_id: str, ne
         ],
         current_session=default_session_id,
         reused_from_analysis=analysis.analysis_id,
+        included_experiment_groups=list(analysis.included_experiment_groups),
+        experiment_groups=[
+            ExperimentGroup(
+                name=group.name,
+                experiments=[ExperimentRef(exp_id=entry.exp_id, user_id=entry.user_id) for entry in group.experiments],
+            )
+            for group in analysis.experiment_groups
+        ],
     )
     iterations: list[str] = []
     iterations_dir = new_path / "iterations"
