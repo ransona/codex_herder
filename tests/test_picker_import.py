@@ -5,7 +5,7 @@ from codex_herder.app import load_picker_groups
 from codex_herder.models import ExperimentRef, experiment_reference_path
 
 
-def test_load_picker_groups_flattens_nested_groups_in_picker_order(tmp_path: Path) -> None:
+def test_load_picker_groups_keeps_experiments_in_their_own_group(tmp_path: Path) -> None:
     database = tmp_path / "experiment_picker.sqlite"
     with sqlite3.connect(database) as connection:
         connection.executescript(
@@ -35,8 +35,8 @@ def test_load_picker_groups_flattens_nested_groups_in_picker_order(tmp_path: Pat
     ]
     assert [(item.exp_id, item.user_id) for item in groups[0].experiments] == [
         ("exp-002", "user-b"),
-        ("exp-001", "user-a"),
     ]
+    assert [(item.exp_id, item.user_id) for item in groups[1].experiments] == [("exp-001", "user-a")]
 
 
 def test_experiment_reference_path_preserves_group_hierarchy() -> None:

@@ -782,7 +782,7 @@ def picker_db_path() -> Path:
 
 
 def load_picker_groups(db_path: Path | None = None) -> list[ExperimentGroup]:
-    """Load Lab Pipeline picker groups and their descendant experiments."""
+    """Load picker groups with only the experiments directly inside each group."""
     path = db_path or picker_db_path()
     if not path.exists():
         return []
@@ -807,20 +807,18 @@ def load_picker_groups(db_path: Path | None = None) -> list[ExperimentGroup]:
             parent_id = parent["parent_id"]
         return experiment_group_path(" / ".join(reversed(names)))
 
-    def descendant_experiments(group_id: int) -> list[ExperimentRef]:
+    def direct_experiments(group_id: int) -> list[ExperimentRef]:
         entries: list[ExperimentRef] = []
         for child in children.get(group_id, []):
             if child["node_type"] == "experiment" and child["exp_id"]:
                 entries.append(ExperimentRef(str(child["exp_id"]), child["user_id"] or None))
-            elif child["node_type"] == "group":
-                entries.extend(descendant_experiments(int(child["id"])))
         return entries
 
     groups = []
     for row in rows:
         if row["node_type"] != "group" or row["parent_id"] is None:
             continue
-        group = ExperimentGroup(group_path(row), descendant_experiments(int(row["id"])))
+        group = ExperimentGroup(group_path(row), direct_experiments(int(row["id"])))
         if group.experiments:
             groups.append(group)
     return groups
